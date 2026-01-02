@@ -95,14 +95,15 @@ model Category {
 }
 
 model Account {
-  id        Int       @id @default(autoincrement())
-  name      String
-  type      String    // "Cash", "Bank Account", "Credit Card", etc.
-  balance   Float     @default(0)
-  expenses  Expense[]
-  incomes   Income[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id           Int       @id @default(autoincrement())
+  name         String
+  type         String    // "Cash", "Bank Account", "Credit Card", etc.
+  balance      Float     @default(0)
+  creditLimit  Float?    // Credit limit for credit card accounts
+  expenses     Expense[]
+  incomes      Income[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Income {
@@ -118,4 +119,20 @@ model Income {
   account       Account? @relation(fields: [accountId], references: [id])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model Debt {
+  id                Int      @id @default(autoincrement())
+  type              String   // "Credit Card", "Car Loan", "Student Loan", "Personal Loan", etc.
+  lender            String   // Name of the lender/bank
+  accountNumber     String?  // Last 4 digits or full account number
+  totalAmount       Float    // Total amount borrowed
+  currentBalance    Float    // Current outstanding balance
+  interestRate      Float?   // Annual interest rate (APR)
+  minimumPayment    Float?   // Minimum monthly payment
+  dueDate           String?  // Due date for payments
+  description       String?  // Additional notes
+  isActive          Boolean  @default(true) // Whether this debt is still active
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }

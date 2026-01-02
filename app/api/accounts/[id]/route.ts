@@ -26,17 +26,34 @@ export async function PUT(
 ) {
     try {
         const { id } = await params;
-        const { name, type, balance } = await request.json();
+        const { name, type, balance, creditLimit } = await request.json();
         if (!name || !type) {
             return NextResponse.json({ error: 'Name and type are required' }, { status: 400 });
+        }
+            
+        // Parse balance as number
+        const parsedBalance = typeof balance === 'string' ? parseFloat(balance) : (balance || 0);
+
+        // Handle creditLimit for credit cards
+        let parsedCreditLimit = null;
+        if (type === 'Credit Card') {
+            if (creditLimit !== undefined && creditLimit !== null && creditLimit !== '') {
+                parsedCreditLimit = typeof creditLimit === 'string' ? parseFloat(creditLimit) : creditLimit;
+            }
         }
 
         const account = await prisma.account.update({
             where: { id: parseInt(id) },
-            data: { name, type, balance: balance || 0 },
+            data: {
+                name,
+                type,
+                balance: parsedBalance,
+                creditLimit: parsedCreditLimit
+            },
         });
         return NextResponse.json(account);
     } catch (error) {
+        console.error('Error updating account:', error);
         return NextResponse.json({ error: 'Failed to update account' }, { status: 500 });
     }
 }

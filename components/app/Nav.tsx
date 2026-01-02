@@ -13,7 +13,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { User, Settings, LogOut } from 'lucide-react';
+import { User, Settings, LogOut, Menu, DollarSign } from 'lucide-react';
 
 interface NavProps {
     onSidebarToggle: () => void;
@@ -81,9 +81,7 @@ export default function Nav({ onSidebarToggle }: NavProps) {
                             onClick={onSidebarToggle}
                             className="mr-2 lg:hidden"
                         >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                            </svg>
+                            <Menu className="w-5 h-5" />
                         </Button>
 
                         {/* Desktop sidebar toggle */}
@@ -93,13 +91,11 @@ export default function Nav({ onSidebarToggle }: NavProps) {
                             onClick={onSidebarToggle}
                             className="mr-2 hidden lg:flex"
                         >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                            </svg>
+                            <Menu className="w-5 h-5" />
                         </Button>
 
                         <Link href="/" className="flex items-center space-x-2">
-                            <span className="font-bold text-xl text-foreground">Expense Tracker</span>
+                            <DollarSign className="w-5 h-5 text-base bg-white" /> Expense Tracker
                         </Link>
                     </div>
 

@@ -15,19 +15,33 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
     try {
-        const { name, type, balance } = await request.json();
+        const { name, type, balance, creditLimit } = await request.json();
         if (!name || !type) {
             return NextResponse.json({ error: 'Name and type are required' }, { status: 400 });
         }
+
+        // Parse balance as number
+        const parsedBalance = typeof balance === 'string' ? parseFloat(balance) : (balance || 0);
+
+        // Handle creditLimit for credit cards
+        let parsedCreditLimit = null;
+        if (type === 'Credit Card') {
+            if (creditLimit !== undefined && creditLimit !== null && creditLimit !== '') {
+                parsedCreditLimit = typeof creditLimit === 'string' ? parseFloat(creditLimit) : creditLimit;
+            }
+        }
+
         const account = await prisma.account.create({
             data: {
                 name,
                 type,
-                balance: balance || 0
+                balance: parsedBalance,
+                creditLimit: parsedCreditLimit
             },
         });
         return NextResponse.json(account, { status: 201 });
     } catch (error) {
+        console.error('Error creating account:', error);
         return NextResponse.json({ error: 'Failed to create account' }, { status: 500 });
     }
 }

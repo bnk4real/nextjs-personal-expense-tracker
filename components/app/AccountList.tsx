@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from "sonner";
 
 const ACCOUNT_TYPES = [
@@ -26,10 +27,12 @@ export default function AccountList() {
     const [addModalOpen, setAddModalOpen] = useState(false);
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+    const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set(ACCOUNT_TYPES));
     const [formData, setFormData] = useState({
         name: '',
         type: '',
-        balance: ''
+        balance: '',
+        creditLimit: ''
     });
 
     const fetchAccounts = () => {
@@ -46,12 +49,35 @@ export default function AccountList() {
         fetchAccounts();
     }, []);
 
+    const handleTypeFilterChange = (type: string, checked: boolean) => {
+        const newSelectedTypes = new Set(selectedTypes);
+        if (checked) {
+            newSelectedTypes.add(type);
+        } else {
+            newSelectedTypes.delete(type);
+        }
+        setSelectedTypes(newSelectedTypes);
+    };
+
+    const handleSelectAll = () => {
+        setSelectedTypes(new Set(ACCOUNT_TYPES));
+    };
+
+    const handleSelectNone = () => {
+        setSelectedTypes(new Set());
+    };
+
+    const filteredAccounts = accounts.filter(account =>
+        selectedTypes.has(account.type)
+    );
+
     const handleEdit = (account: Account) => {
         setEditingAccount(account);
         setFormData({
             name: account.name,
             type: account.type,
-            balance: account.balance.toString()
+            balance: account.balance.toString(),
+            creditLimit: account.creditLimit?.toString() || ''
         });
         setEditModalOpen(true);
     };
@@ -79,13 +105,14 @@ export default function AccountList() {
             },
             body: JSON.stringify({
                 ...formData,
-                balance: parseFloat(formData.balance) || 0
+                balance: parseFloat(formData.balance) || 0,
+                creditLimit: formData.type === 'Credit Card' ? parseFloat(formData.creditLimit) || 0 : undefined
             }),
         });
         if (response.ok) {
             toast.success("Account added successfully!");
             setAddModalOpen(false);
-            setFormData({ name: '', type: '', balance: '' });
+            setFormData({ name: '', type: '', balance: '', creditLimit: '' });
             fetchAccounts(); // Refresh list
         } else {
             toast.error("Failed to add account");
@@ -103,15 +130,16 @@ export default function AccountList() {
             },
             body: JSON.stringify({
                 ...formData,
-                balance: parseFloat(formData.balance) || 0
+                balance: parseFloat(formData.balance) || 0,
+                creditLimit: formData.type === 'Credit Card' ? parseFloat(formData.creditLimit) || 0 : undefined
             }),
         });
         if (response.ok) {
             toast.success("Account updated successfully!");
             setEditModalOpen(false);
             setEditingAccount(null);
-            setFormData({ name: '', type: '', balance: '' });
-            fetchAccounts(); // Refresh list
+            setFormData({ name: '', type: '', balance: '', creditLimit: '' });
+            fetchAccounts();
         } else {
             toast.error("Failed to update account");
         }
@@ -121,7 +149,7 @@ export default function AccountList() {
         setAddModalOpen(false);
         setEditModalOpen(false);
         setEditingAccount(null);
-        setFormData({ name: '', type: '', balance: '' });
+        setFormData({ name: '', type: '', balance: '', creditLimit: '' });
     };
 
     if (loading) {
@@ -193,6 +221,20 @@ export default function AccountList() {
                                     placeholder="0.00"
                                 />
                             </div>
+                            {formData.type === 'Credit Card' && (
+                                <div className="space-y-2">
+                                    <Label htmlFor="account-credit-limit">Credit Limit</Label>
+                                    <Input
+                                        id="account-credit-limit"
+                                        type="number"
+                                        step="0.01"
+                                        value={formData.creditLimit}
+                                        onChange={(e) => setFormData({ ...formData, creditLimit: e.target.value })}
+                                        placeholder="5000.00"
+                                        required
+                                    />
+                                </div>
+                            )}
                             <div className="flex justify-end space-x-2">
                                 <Button type="button" variant="outline" onClick={handleModalClose}>
                                     Cancel
@@ -245,6 +287,20 @@ export default function AccountList() {
                                     placeholder="0.00"
                                 />
                             </div>
+                            {formData.type === 'Credit Card' && (
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-account-credit-limit">Credit Limit</Label>
+                                    <Input
+                                        id="edit-account-credit-limit"
+                                        type="number"
+                                        step="0.01"
+                                        value={formData.creditLimit}
+                                        onChange={(e) => setFormData({ ...formData, creditLimit: e.target.value })}
+                                        placeholder="5000.00"
+                                        required
+                                    />
+                                </div>
+                            )}
                             <div className="flex justify-end space-x-2">
                                 <Button type="button" variant="outline" onClick={handleModalClose}>
                                     Cancel
@@ -256,7 +312,58 @@ export default function AccountList() {
                 </Dialog>
             </div>
 
-            {accounts.length === 0 ? (
+            {/* Account Type Filter */}
+            <Card className="mb-6">
+                <CardContent className="p-4">
+                    <div className="flex flex-col space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-semibold">Filter Account Type</h3>
+                            <div className="flex space-x-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleSelectAll}
+                                    className="text-xs"
+                                >
+                                    Select All
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleSelectNone}
+                                    className="text-xs"
+                                >
+                                    Select None
+                                </Button>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                            {ACCOUNT_TYPES.map((type) => (
+                                <div key={type} className="flex items-center space-x-2">
+                                    <Checkbox
+                                        id={`filter-${type}`}
+                                        checked={selectedTypes.has(type)}
+                                        onCheckedChange={(checked) =>
+                                            handleTypeFilterChange(type, checked as boolean)
+                                        }
+                                    />
+                                    <Label
+                                        htmlFor={`filter-${type}`}
+                                        className="text-sm font-medium cursor-pointer"
+                                    >
+                                        {type}
+                                    </Label>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                            Showing {filteredAccounts.length} of {accounts.length} accounts
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {filteredAccounts.length === 0 ? (
                 <Card>
                     <CardContent className="flex flex-col items-center justify-center py-12">
                         <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center mb-4">
@@ -264,16 +371,23 @@ export default function AccountList() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                             </svg>
                         </div>
-                        <h3 className="text-lg font-semibold mb-2">No accounts yet</h3>
+                        <h3 className="text-lg font-semibold mb-2">
+                            {accounts.length === 0 ? 'No accounts yet' : 'No accounts match your filters'}
+                        </h3>
                         <p className="text-muted-foreground text-center mb-4">
-                            Get started by adding your first financial account.
+                            {accounts.length === 0
+                                ? 'Get started by adding your first financial account.'
+                                : 'Try adjusting your account type filters to see more accounts.'
+                            }
                         </p>
-                        <Button onClick={() => setAddModalOpen(true)}>Add Account</Button>
+                        {accounts.length === 0 && (
+                            <Button onClick={() => setAddModalOpen(true)}>Add Account</Button>
+                        )}
                     </CardContent>
                 </Card>
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {accounts.map((account: Account) => (
+                    {filteredAccounts.map((account: Account) => (
                         <Card key={account.id} className="hover:shadow-md transition-shadow">
                             <CardHeader className="pb-3">
                                 <div className="flex items-center justify-between">
@@ -285,12 +399,47 @@ export default function AccountList() {
                             </CardHeader>
                             <CardContent>
                                 <div className="space-y-4">
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Current Balance</p>
-                                        <p className={`text-2xl font-bold ${account.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                            ${account.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </p>
-                                    </div>
+                                    {account.type === 'Credit Card' ? (
+                                        <div className="space-y-3">
+                                            <div>
+                                                <p className="text-sm text-muted-foreground">Current Balance</p>
+                                                <p className={`text-xl font-bold ${account.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                                    ${account.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </p>
+                                            </div>
+                                            {account.creditLimit && (
+                                                <>
+                                                    <div>
+                                                        <p className="text-sm text-muted-foreground">Available Credit</p>
+                                                        <p className="text-lg font-semibold text-green-600">
+                                                            ${(account.creditLimit - account.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm text-muted-foreground">Credit Utilization</p>
+                                                        <div className="flex items-center space-x-2">
+                                                            <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                                                <div
+                                                                    className={`h-2 rounded-full ${account.balance / account.creditLimit > 0.7 ? 'bg-red-500' : account.balance / account.creditLimit > 0.3 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                                                                    style={{ width: `${Math.min((account.balance / account.creditLimit) * 100, 100)}%` }}
+                                                                ></div>
+                                                            </div>
+                                                            <span className="text-sm font-medium">
+                                                                {((account.balance / account.creditLimit) * 100).toFixed(1)}%
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">Current Balance</p>
+                                            <p className={`text-2xl font-bold ${account.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                ${account.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                        </div>
+                                    )}
                                     <div className="flex space-x-2">
                                         <Button
                                             variant="outline"
