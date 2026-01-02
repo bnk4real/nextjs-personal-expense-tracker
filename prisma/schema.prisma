@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Image {
+  id       String @id
+  reportId String
+  filename String
+  mimeType String
+  size     Int
+  Report   Report @relation(fields: [reportId], references: [id])
+}
+
+model Report {
+  id        String   @id
+  title     String
+  prompt    String?
+  findings  Json
+  createdAt DateTime @default(now())
+  Image     Image[]
+}
+
+model ai_models {
+  id          String   @id
+  name        String   @unique
+  description String?
+  created_at  DateTime @default(now())
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model people {
+  first_name    String?         @default("")
+  last_name     String?
+  username      String?         @unique
+  password_hash String?
+  created_at    DateTime        @default(now())
+  user_id       String          @id @db.Uuid
+  email         String?         @unique
+  avatar        String?
+  sessions      sessions[]
+  subscriptions subscriptions[]
+}
+
+model sessions {
+  id         String   @id @db.Uuid
+  user_id    String   @db.Uuid
+  token_hash String   @unique
+  expires_at DateTime
+  created_at DateTime @default(now())
+  people     people   @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id])
+}
+
+model subscriptions {
+  id                String    @id @default(uuid()) @db.Uuid
+  user_id           String    @db.Uuid
+  name              String
+  provider          String?
+  price_cents       Int
+  currency          String    @default("USD")
+  billing_cycle     String    @default("monthly")
+  next_payment_date DateTime?
+  website_url       String?
+  notes             String?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  people            people    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([next_payment_date])
+  @@index([user_id])
+}
+
+model Expense {
+  id          Int      @id @default(autoincrement())
+  amount      Float
+  category    String
+  date        String
+  description String
+  accountId   Int?
+  account     Account? @relation(fields: [accountId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Category {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id        Int       @id @default(autoincrement())
+  name      String
+  type      String    // "Cash", "Bank Account", "Credit Card", etc.
+  balance   Float     @default(0)
+  expenses  Expense[]
+  incomes   Income[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Income {
+  id            Int      @id @default(autoincrement())
+  amount        Float
+  source        String   // "Salary", "Freelance", "Investment", etc.
+  date          String
+  description   String
+  notes         String?  // Optional notes for extra income
+  state         String?  // US state for tax calculations
+  filingStatus  String?  // Tax filing status: single, married_filing_jointly, etc.
+  accountId     Int?
+  account       Account? @relation(fields: [accountId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
