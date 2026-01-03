@@ -118,7 +118,7 @@ export async function DELETE(
         if (expense.accountId) {
             await prisma.account.update({
                 where: { id: expense.accountId },
-                data: { balance: expense.account.balance + expense.amount }
+                data: { balance: { increment: expense.amount } }
             });
         }
 
