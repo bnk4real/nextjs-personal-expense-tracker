@@ -7,14 +7,15 @@ import { cn } from '@/lib/utils';
 import {
     LayoutDashboard,
     TrendingUp,
-    TrendingDown,
     Tag,
     Wallet,
     Repeat,
     DollarSign,
     Calculator,
     Settings,
-    X
+    X,
+    FileText,
+    MessageCircle
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -29,14 +30,9 @@ const navigationItems = [
         icon: <LayoutDashboard className="w-5 h-5" />,
     },
     {
-        href: '/incomes',
-        label: 'Incomes',
+        href: '/earnings',
+        label: 'Spending',
         icon: <TrendingUp className="w-5 h-5" />,
-    },
-    {
-        href: '/expenses',
-        label: 'Expenses',
-        icon: <TrendingDown className="w-5 h-5" />,
     },
     {
         href: '/categories',
@@ -62,6 +58,16 @@ const navigationItems = [
         href: '/tax-info',
         label: 'Tax Calculator',
         icon: <Calculator className="w-5 h-5" />,
+    },
+    {
+        href: '/reports',
+        label: 'Reports',
+        icon: <FileText className="w-5 h-5" />,
+    },
+    {
+        href: '/chatbot',
+        label: 'AI Assistant',
+        icon: <MessageCircle className="w-5 h-5" />,
     },
     {
         href: '/settings',
@@ -97,7 +103,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                                 <DollarSign className="w-5 h-5 text-white" />
                             </div>
-                            <span className="font-bold text-lg text-foreground">Expense Tracker</span>
+                            <span className="font-bold text-lg text-foreground">SubTracker</span>
                         </Link>
                         <Button
                             variant="ghost"
@@ -118,7 +124,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                                         href={item.href}
                                         onClick={onClose}
                                         className={cn(
-                                            "flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                                            "flex items-center space-x-3 px-3 py-2 rounded-lg text-lg font-medium transition-colors",
                                             pathname === item.href
                                                 ? "bg-primary text-primary-foreground"
                                                 : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
@@ -135,7 +141,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     {/* Footer */}
                     <div className="p-4 border-t border-gray-200">
                         <p className="text-xs text-gray-500 text-center">
-                            © 2026 Expense Tracker
+                            © {new Date().getFullYear()} SubTracker
                         </p>
                     </div>
                 </div>

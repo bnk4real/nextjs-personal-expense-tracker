@@ -1,4 +1,4 @@
-# 💰 Expense Tracker
+# 💰 SubTracker
 
 A comprehensive personal finance management application built with Next.js, featuring subscription tracking, expense management, income tracking with tax calculations, and detailed state tax information.
 

@@ -16,7 +16,7 @@ const ptMono = PT_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BNK - Expense Tracker Application",
+  title: "BNK - SubTracker Application",
   description: "A simple personal expense tracker.",
 };
 

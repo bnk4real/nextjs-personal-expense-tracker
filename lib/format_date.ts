@@ -30,16 +30,16 @@ export function formatDateForDisplay(dateInput: string | Date | null | undefined
   }
 
   if (typeof dateInput === 'string') {
+    // For YYYY-MM-DD format stored as UTC, convert to local date for display
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+      const localDate = utcStringToLocalDate(dateInput);
+      return localDate.toLocaleDateString();
+    }
+
     // Try to parse as ISO string or other formats
     const date = new Date(dateInput);
     if (!isNaN(date.getTime())) {
       return date.toLocaleDateString();
-    }
-
-    // Try YYYY-MM-DD format
-    const ymdDate = new Date(dateInput + 'T00:00:00');
-    if (!isNaN(ymdDate.getTime())) {
-      return ymdDate.toLocaleDateString();
     }
   }
 
@@ -65,8 +65,33 @@ export function doesDateStringMatchUTC(dateString: string, date: Date): boolean 
 }
 
 /**
- * Get today's date in YYYY-MM-DD format
+ * Get today's date in YYYY-MM-DD format (local timezone)
  */
 export function getTodayString(): string {
-  return new Date().toISOString().split('T')[0];
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Convert a local date string (YYYY-MM-DD) to UTC date string for storage
+ */
+export function localDateToUTCString(dateString: string): string {
+  const [year, month, day] = dateString.split('-').map(Number);
+  const localDate = new Date(year, month - 1, day);
+  const utcDate = new Date(localDate.getTime() - (localDate.getTimezoneOffset() * 60000));
+  const utcYear = utcDate.getUTCFullYear();
+  const utcMonth = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
+  const utcDay = String(utcDate.getUTCDate()).padStart(2, '0');
+  return `${utcYear}-${utcMonth}-${utcDay}`;
+}
+
+/**
+ * Convert a UTC date string (YYYY-MM-DD) to local date for display
+ */
+export function utcStringToLocalDate(dateString: string): Date {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day);
 }

@@ -80,7 +80,7 @@ export default function RegisterPage() {
                     </div>
                     <CardTitle className="text-2xl text-center">Create account</CardTitle>
                     <CardDescription className="text-center">
-                        Sign up for your Expense Tracker account
+                        Sign up for your SubTracker account
                     </CardDescription>
                 </CardHeader>
                 <CardContent>

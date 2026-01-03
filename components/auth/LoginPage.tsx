@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
 
 import { useState } from 'react';
@@ -117,22 +118,14 @@ export default function LoginPage() {
                         </Button>
                     </form>
 
-                    <div className="mt-6 text-center">
+                    {/* <div className="mt-6 text-center">
                         <p className="text-sm text-gray-600">
                             Do you have an account?{' '}
                             <Link href="/register" className="font-medium text-primary hover:text-primary/80">
                                 Sign up
                             </Link>
                         </p>
-                    </div>
-
-                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                        <p className="text-sm text-blue-800 text-center">
-                            <strong>Demo Credentials:</strong><br />
-                            Username: demo<br />
-                            Password: demo123
-                        </p>
-                    </div>
+                    </div> */}
                 </CardContent>
             </Card>
         </div>

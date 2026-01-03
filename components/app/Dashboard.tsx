@@ -1,27 +1,38 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Expense, Account, Category } from '@/lib/types';
+import { Expense, Account, Category, Subscription } from '@/lib/types';
 import Calendar from '@/lib/Calendar';
 import { doesDateStringMatchUTC, parseUTCDate, formatDateForDisplay } from '@/lib/format_date';
 import { DollarSign, Wallet, Tag, CreditCard } from 'lucide-react';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 
 export default function Dashboard() {
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
+    const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedDate, setSelectedDate] = useState<Date | undefined>();
+    const [dialogOpen, setDialogOpen] = useState(false);
 
     useEffect(() => {
         Promise.all([
             fetch('/api/expenses').then(res => res.json()),
             fetch('/api/accounts').then(res => res.json()),
-            fetch('/api/categories').then(res => res.json())
-        ]).then(([expensesData, accountsData, categoriesData]) => {
+            fetch('/api/categories').then(res => res.json()),
+            fetch('/api/subscriptions').then(res => res.json())
+        ]).then(([expensesData, accountsData, categoriesData, subscriptionsData]) => {
             setExpenses(expensesData);
             setAccounts(accountsData);
             setCategories(categoriesData);
+            setSubscriptions(subscriptionsData);
             setLoading(false);
         }).catch(() => setLoading(false));
     }, []);
@@ -31,11 +42,34 @@ export default function Dashboard() {
     const totalCategories = categories.length;
     const totalAccounts = accounts.length;
 
+    // Get upcoming subscription payments (next 30 days)
+    const upcomingPayments = subscriptions
+        .filter(sub => {
+            if (!sub.next_payment_date) return false;
+            const paymentDate = new Date(sub.next_payment_date);
+            const today = new Date();
+            const thirtyDaysFromNow = new Date();
+            thirtyDaysFromNow.setDate(today.getDate() + 30);
+            return paymentDate >= today && paymentDate <= thirtyDaysFromNow;
+        })
+        .sort((a, b) => new Date(a.next_payment_date!).getTime() - new Date(b.next_payment_date!).getTime())
+        .slice(0, 5); // Show next 5 upcoming payments
+
     const filteredExpenses = selectedDate
         ? expenses.filter(expense => doesDateStringMatchUTC(expense.date, selectedDate))
         : expenses.slice(0, 5);
 
     const expenseDates = expenses.map(expense => parseUTCDate(expense.date));
+    const subscriptionDates = subscriptions
+        .filter(sub => sub.next_payment_date)
+        .map(sub => new Date(sub.next_payment_date!));
+
+    const handleDateSelect = (date: Date | undefined) => {
+        setSelectedDate(date);
+        if (date) {
+            setDialogOpen(true);
+        }
+    };
 
     if (loading) return <div className="p-6">Loading...</div>;
 
@@ -96,9 +130,100 @@ export default function Dashboard() {
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow">
                     <h2 className="text-xl font-semibold mb-4">Calendar</h2>
-                    <Calendar onSelect={setSelectedDate} modifiers={{ hasExpense: expenseDates }} />
+                    <Calendar onSelect={handleDateSelect} modifiers={{ hasExpense: expenseDates, hasSubscription: subscriptionDates }} />
                 </div>
             </div>
+
+            <div className="bg-white p-4 rounded-lg shadow mt-6">
+                <h2 className="text-xl font-semibold mb-4">Upcoming Payments</h2>
+                {upcomingPayments.length > 0 ? (
+                    <ul className="space-y-2">
+                        {upcomingPayments.map((subscription: Subscription) => (
+                            <li key={subscription.id} className="flex justify-between p-2 border-b">
+                                <div>
+                                    <p className="font-medium">{subscription.name}</p>
+                                    <p className="text-sm text-gray-600">
+                                        {subscription.provider} - {subscription.next_payment_date ? formatDateForDisplay(subscription.next_payment_date) : 'N/A'}
+                                    </p>
+                                </div>
+                                <p className="font-bold text-red-600">
+                                    ${(subscription.price_cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p className="text-gray-500">No upcoming payments in the next 30 days.</p>
+                )}
+            </div>
+
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {selectedDate ? `Details for ${selectedDate.toLocaleDateString()}` : 'Date Details'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Expenses and subscription payments for this date
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-6">
+                        {/* Expenses Section */}
+                        <div>
+                            <h3 className="text-lg font-semibold mb-3 text-red-600">Expenses</h3>
+                            {filteredExpenses.length > 0 ? (
+                                <ul className="space-y-2">
+                                    {filteredExpenses.map((expense: Expense) => (
+                                        <li key={expense.id} className="flex justify-between p-3 border rounded-lg">
+                                            <div>
+                                                <p className="font-medium">{expense.description}</p>
+                                                <p className="text-sm text-gray-600">
+                                                    {expense.category} • {formatDateForDisplay(expense.date)}
+                                                </p>
+                                            </div>
+                                            <p className="font-bold text-red-600">
+                                                ${expense.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-gray-500">No expenses on this date.</p>
+                            )}
+                        </div>
+
+                        {/* Subscriptions Section */}
+                        <div>
+                            <h3 className="text-lg font-semibold mb-3 text-blue-600">Subscription Payments</h3>
+                            {selectedDate && (() => {
+                                const daySubscriptions = subscriptions.filter(sub =>
+                                    sub.next_payment_date &&
+                                    doesDateStringMatchUTC(sub.next_payment_date, selectedDate)
+                                );
+                                return daySubscriptions.length > 0 ? (
+                                    <ul className="space-y-2">
+                                        {daySubscriptions.map((subscription: Subscription) => (
+                                            <li key={subscription.id} className="flex justify-between p-3 border rounded-lg">
+                                                <div>
+                                                    <p className="font-medium">{subscription.name}</p>
+                                                    <p className="text-sm text-gray-600">
+                                                        {subscription.provider} • {subscription.billing_cycle} • {subscription.next_payment_date ? formatDateForDisplay(subscription.next_payment_date) : 'N/A'}
+                                                    </p>
+                                                </div>
+                                                <p className="font-bold text-blue-600">
+                                                    ${(subscription.price_cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </p>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <p className="text-gray-500">No subscription payments on this date.</p>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

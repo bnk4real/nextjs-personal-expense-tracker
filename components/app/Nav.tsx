@@ -13,6 +13,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import CalculatorDialog from '@/components/ui/calculator-dialog';
 import { User, Settings, LogOut, Menu, DollarSign } from 'lucide-react';
 
 interface NavProps {
@@ -61,7 +62,6 @@ export default function Nav({ onSidebarToggle }: NavProps) {
     const router = useRouter();
 
     const handleLogout = useCallback(() => {
-        // Clear token cookie
         if (typeof window !== 'undefined') {
             document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
         }
@@ -95,12 +95,15 @@ export default function Nav({ onSidebarToggle }: NavProps) {
                         </Button>
 
                         <Link href="/" className="flex items-center space-x-2">
-                            <DollarSign className="w-5 h-5 text-base bg-white" /> Expense Tracker
+                            <DollarSign className="w-5 h-5 text-base bg-white" /> SubTracker
                         </Link>
                     </div>
 
                     {/* Empty div to maintain layout balance */}
-                    <div className="flex items-center">
+                    <div className="flex items-center space-x-2">
+                        {/* Calculator Dialog */}
+                        <CalculatorDialog />
+
                         {/* Profile Dropdown */}
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>

@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { Expense, Category, Account } from '@/lib/types';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { formatDateForDisplay, getTodayString } from '@/lib/format_date';
+import { formatDateForDisplay, getTodayString, localDateToUTCString } from '@/lib/format_date';
 import { toast } from "sonner";
+import { PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
 
 export default function ExpenseList() {
     const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -93,6 +94,7 @@ export default function ExpenseList() {
             body: JSON.stringify({
                 ...formData,
                 amount: parseFloat(formData.amount),
+                date: localDateToUTCString(formData.date), // Convert to UTC for storage
                 accountId: formData.accountId ? parseInt(formData.accountId) : null
             }),
         });
@@ -124,6 +126,7 @@ export default function ExpenseList() {
             body: JSON.stringify({
                 ...formData,
                 amount: parseFloat(formData.amount),
+                date: localDateToUTCString(formData.date), // Convert to UTC for storage
                 accountId: formData.accountId ? parseInt(formData.accountId) : null
             }),
         });
@@ -156,6 +159,38 @@ export default function ExpenseList() {
             accountId: ''
         });
     };
+
+    // Chart data processing
+    const getExpensesByCategory = () => {
+        const categoryTotals = expenses.reduce((acc, expense) => {
+            acc[expense.category] = (acc[expense.category] || 0) + expense.amount;
+            return acc;
+        }, {} as Record<string, number>);
+
+        return Object.entries(categoryTotals).map(([category, amount]) => ({
+            name: category,
+            value: amount,
+            amount: amount.toFixed(2)
+        }));
+    };
+
+    const getExpensesOverTime = () => {
+        const monthlyTotals = expenses.reduce((acc, expense) => {
+            const date = new Date(expense.date);
+            const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            acc[monthKey] = (acc[monthKey] || 0) + expense.amount;
+            return acc;
+        }, {} as Record<string, number>);
+
+        return Object.entries(monthlyTotals)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([month, amount]) => ({
+                month,
+                amount: parseFloat(amount.toFixed(2))
+            }));
+    };
+
+    const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#FF7C7C'];
 
     if (loading) {
         return (
@@ -340,6 +375,62 @@ export default function ExpenseList() {
                     </DialogContent>
                 </Dialog>
             </div>
+
+            {/* Charts Section */}
+            {expenses.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Expenses by Category</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <ResponsiveContainer width="100%" height={300}>
+                                <PieChart>
+                                    <Pie
+                                        data={getExpensesByCategory()}
+                                        cx="50%"
+                                        cy="50%"
+                                        labelLine={false}
+                                        label={({ name, percent }) => `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`}
+                                        outerRadius={80}
+                                        fill="#8884d8"
+                                        dataKey="value"
+                                    >
+                                        {getExpensesByCategory().map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip formatter={(value: number | undefined) => value ? [`$${value.toFixed(2)}`, 'Amount'] : ['$0.00', 'Amount']} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Monthly Spending Trend</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <ResponsiveContainer width="100%" height={300}>
+                                <LineChart data={getExpensesOverTime()}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="month" />
+                                    <YAxis />
+                                    <Tooltip formatter={(value: number | undefined) => value ? [`$${value.toFixed(2)}`, 'Amount'] : ['$0.00', 'Amount']} />
+                                    <Legend />
+                                    <Line
+                                        type="monotone"
+                                        dataKey="amount"
+                                        stroke="#8884d8"
+                                        strokeWidth={2}
+                                        dot={{ fill: '#8884d8' }}
+                                    />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
 
             {expenses.length === 0 ? (
                 <Card>
