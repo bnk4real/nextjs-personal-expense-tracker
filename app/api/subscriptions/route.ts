@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
         }
 
         const subscriptions = await prisma.subscriptions.findMany({
-            // where: { user_id: decoded.user_id },
+            where: { user_id: decoded.user_id },
             orderBy: {
                 next_payment_date: 'asc'
             }
