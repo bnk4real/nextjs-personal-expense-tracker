@@ -73,7 +73,7 @@ export async function PUT(
         }
 
         const { id } = await params;
-        const { name, provider, price_cents, currency, billing_cycle, next_payment_date, website_url, notes } = await request.json();
+        const { name, provider, price_cents, currency, billing_cycle, start_date, next_payment_date, status, end_date, website_url, notes, categoryId } = await request.json();
 
         if (!name || !price_cents || !billing_cycle) {
             return NextResponse.json(
@@ -91,9 +91,13 @@ export async function PUT(
                 price_cents: parseInt(price_cents),
                 currency: currency || 'USD',
                 billing_cycle,
-                next_payment_date: next_payment_date ? new Date(next_payment_date) : null,
+                start_date: start_date ? new Date(start_date) : undefined,
+                next_payment_date: next_payment_date ? new Date(next_payment_date) : undefined,
+                status: status || 'active',
+                end_date: end_date ? new Date(end_date) : undefined,
                 website_url,
                 notes,
+                categoryId: categoryId ? parseInt(categoryId) : null,
                 updated_at: new Date()
             }
         });

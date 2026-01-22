@@ -21,6 +21,7 @@ export default function Dashboard() {
     const [loading, setLoading] = useState(true);
     const [selectedDate, setSelectedDate] = useState<Date | undefined>();
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [selectedMonth, setSelectedMonth] = useState<string>('all');
 
     useEffect(() => {
         Promise.all([
@@ -55,9 +56,28 @@ export default function Dashboard() {
         .sort((a, b) => new Date(a.next_payment_date!).getTime() - new Date(b.next_payment_date!).getTime())
         .slice(0, 5); // Show next 5 upcoming payments
 
-    const filteredExpenses = selectedDate
-        ? expenses.filter(expense => doesDateStringMatchUTC(expense.date, selectedDate))
-        : expenses.slice(0, 5);
+    const filteredExpenses = (() => {
+        let filtered = expenses;
+
+        // Filter by month if not 'all'
+        if (selectedMonth !== 'all') {
+            filtered = filtered.filter(expense => {
+                const expenseDate = parseUTCDate(expense.date);
+                const month = (expenseDate.getMonth() + 1).toString().padStart(2, '0');
+                return month === selectedMonth;
+            });
+        }
+
+        // Filter by selected date if present
+        if (selectedDate) {
+            filtered = filtered.filter(expense => doesDateStringMatchUTC(expense.date, selectedDate));
+        } else if (selectedMonth === 'all') {
+            // If no date selected and no month filter, show first 5
+            filtered = filtered.slice(0, 5);
+        }
+
+        return filtered;
+    })();
 
     const expenseDates = expenses.map(expense => parseUTCDate(expense.date));
     const subscriptionDates = subscriptions
@@ -108,9 +128,43 @@ export default function Dashboard() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white p-4 rounded-lg shadow">
-                    <h2 className="text-xl font-semibold mb-4">
-                        {selectedDate ? `Expenses on ${selectedDate.toLocaleDateString()}` : 'Recent Expenses'}
-                    </h2>
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-xl font-semibold">
+                            {selectedDate ? `Expenses on ${selectedDate.toLocaleDateString()}` : 
+                             selectedMonth !== 'all' ? `Expenses in ${new Date(2000, parseInt(selectedMonth) - 1, 1).toLocaleDateString('en-US', { month: 'long' })}` : 
+                             'Recent Expenses'}
+                        </h2>
+                        {!selectedDate && (
+                            <div className="flex space-x-2">
+                                <button
+                                    onClick={() => setSelectedMonth('all')}
+                                    className={`px-3 py-1 text-sm rounded ${selectedMonth === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+                                >
+                                    All
+                                </button>
+                                <button
+                                    onClick={() => setSelectedMonth(new Date().toISOString().slice(5, 7))}
+                                    className={`px-3 py-1 text-sm rounded ${selectedMonth === new Date().toISOString().slice(5, 7) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+                                >
+                                    This Month
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        const now = new Date();
+                                        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                                        setSelectedMonth(lastMonth.toISOString().slice(5, 7));
+                                    }}
+                                    className={`px-3 py-1 text-sm rounded ${(() => {
+                                        const now = new Date();
+                                        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                                        return selectedMonth === lastMonth.toISOString().slice(5, 7);
+                                    })() ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+                                >
+                                    Last Month
+                                </button>
+                            </div>
+                        )}
+                    </div>
                     <ul className="space-y-2">
                         {filteredExpenses.map((expense: Expense) => (
                             <li key={expense.id} className="flex justify-between p-2 border-b">
@@ -126,6 +180,9 @@ export default function Dashboard() {
                     </ul>
                     {selectedDate && filteredExpenses.length === 0 && (
                         <p className="text-gray-500 mt-4">No expenses on this date.</p>
+                    )}
+                    {!selectedDate && selectedMonth !== 'all' && filteredExpenses.length === 0 && (
+                        <p className="text-gray-500 mt-4">No expenses in selected month.</p>
                     )}
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow">

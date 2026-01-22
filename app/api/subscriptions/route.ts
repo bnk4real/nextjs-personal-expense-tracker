@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { Prisma } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -32,6 +31,9 @@ export async function GET(request: NextRequest) {
 
         const subscriptions = await prisma.subscriptions.findMany({
             where: { user_id: decoded.user_id },
+            include: {
+                category: true
+            },
             orderBy: {
                 next_payment_date: 'asc'
             }
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
 
-        const { name, provider, price_cents, currency, billing_cycle, next_payment_date, website_url, notes } = await request.json();
+        const { name, provider, price_cents, currency, billing_cycle, start_date, next_payment_date, status, end_date, website_url, notes, categoryId } = await request.json();
 
         if (!name || !price_cents || !billing_cycle) {
             return NextResponse.json(
@@ -81,9 +83,13 @@ export async function POST(request: NextRequest) {
                 price_cents: parseInt(price_cents),
                 currency: currency || 'USD',
                 billing_cycle,
+                start_date: start_date ? new Date(start_date) : new Date(),
                 next_payment_date: next_payment_date ? new Date(next_payment_date) : null,
+                status: status || 'active',
+                end_date: end_date ? new Date(end_date) : null,
                 website_url,
                 notes,
+                categoryId: categoryId ? parseInt(categoryId) : null,
             } 
         });
 

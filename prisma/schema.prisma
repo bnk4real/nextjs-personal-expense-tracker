@@ -43,6 +43,7 @@ model people {
   avatar        String?
   sessions      sessions[]
   subscriptions subscriptions[]
+  categories    Category[]
 }
 
 model sessions {
@@ -64,15 +65,21 @@ model subscriptions {
   price_cents       Int
   currency          String    @default("USD")
   billing_cycle     String    @default("monthly")
+  start_date        DateTime  @default(now())
   next_payment_date DateTime?
+  status            String    @default("active")
+  end_date          DateTime?
   website_url       String?
   notes             String?
   created_at        DateTime  @default(now())
   updated_at        DateTime  @updatedAt
   people            people    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  categoryId        Int?
+  category          Category? @relation(fields: [categoryId], references: [id])
 
   @@index([next_payment_date])
   @@index([user_id])
+  @@index([status])
 }
 
 model Expense {
@@ -81,58 +88,63 @@ model Expense {
   category    String
   date        String
   description String
-  accountId   Int?
-  account     Account? @relation(fields: [accountId], references: [id])
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  accountId   Int?
+  account     Account? @relation(fields: [accountId], references: [id])
 }
 
 model Category {
-  id        Int     @id @default(autoincrement())
-  name      String  @unique
+  id        Int      @id @default(autoincrement())
+  name      String
+  user_id   String?  @db.Uuid
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  user      people?  @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  subscriptions subscriptions[]
+
+  @@unique([name, user_id])
 }
 
 model Account {
-  id           Int       @id @default(autoincrement())
-  name         String
-  type         String    // "Cash", "Bank Account", "Credit Card", etc.
-  balance      Float     @default(0)
-  creditLimit  Float?    // Credit limit for credit card accounts
-  expenses     Expense[]
-  incomes      Income[]
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id          Int       @id @default(autoincrement())
+  name        String
+  type        String
+  balance     Float     @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  creditLimit Float?
+  expenses    Expense[]
+  incomes     Income[]
 }
 
 model Income {
-  id            Int      @id @default(autoincrement())
-  amount        Float
-  source        String   // "Salary", "Freelance", "Investment", etc.
-  date          String
-  description   String
-  notes         String?  // Optional notes for extra income
-  state         String?  // US state for tax calculations
-  filingStatus  String?  // Tax filing status: single, married_filing_jointly, etc.
-  accountId     Int?
-  account       Account? @relation(fields: [accountId], references: [id])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  amount       Float
+  source       String
+  date         String
+  description  String
+  notes        String?
+  accountId    Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  filingStatus String?
+  state        String?
+  account      Account? @relation(fields: [accountId], references: [id])
 }
 
 model Debt {
-  id                Int      @id @default(autoincrement())
-  type              String   // "Credit Card", "Car Loan", "Student Loan", "Personal Loan", etc.
-  lender            String   // Name of the lender/bank
-  accountNumber     String?  // Last 4 digits or full account number
-  totalAmount       Float    // Total amount borrowed
-  currentBalance    Float    // Current outstanding balance
-  interestRate      Float?   // Annual interest rate (APR)
-  minimumPayment    Float?   // Minimum monthly payment
-  dueDate           String?  // Due date for payments
-  description       String?  // Additional notes
-  isActive          Boolean  @default(true) // Whether this debt is still active
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id             Int      @id @default(autoincrement())
+  type           String
+  lender         String
+  accountNumber  String?
+  totalAmount    Float
+  currentBalance Float
+  interestRate   Float?
+  minimumPayment Float?
+  dueDate        String?
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
