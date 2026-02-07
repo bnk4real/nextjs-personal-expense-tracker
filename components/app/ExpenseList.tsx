@@ -20,6 +20,8 @@ export default function ExpenseList() {
     const [addModalOpen, setAddModalOpen] = useState(false);
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+    const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+    const [daysToShow, setDaysToShow] = useState(7);
     const [formData, setFormData] = useState({
         amount: '',
         category: '',
@@ -160,6 +162,41 @@ export default function ExpenseList() {
         });
     };
 
+    const toggleDateCollapse = (date: string) => {
+        setCollapsedDates(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(date)) {
+                newSet.delete(date);
+            } else {
+                newSet.add(date);
+            }
+            return newSet;
+        });
+    };
+
+    const handleLoadMore = () => {
+        setDaysToShow(prev => prev + 7);
+    };
+
+    const hasMoreTransactions = () => {
+        const currentDate = new Date();
+        const cutoffDate = new Date(currentDate.getTime() - (daysToShow * 24 * 60 * 60 * 1000));
+        return expenses.some(expense => new Date(expense.date) < cutoffDate);
+    };
+
+    const getCurrentMonthSpending = () => {
+        const currentDate = new Date();
+        const currentMonth = currentDate.getMonth();
+        const currentYear = currentDate.getFullYear();
+        
+        return expenses
+            .filter(expense => {
+                const expenseDate = new Date(expense.date);
+                return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+            })
+            .reduce((total, expense) => total + expense.amount, 0);
+    };
+
     // Chart data processing
     const getExpensesByCategory = () => {
         const categoryTotals = expenses.reduce((acc, expense) => {
@@ -192,6 +229,39 @@ export default function ExpenseList() {
 
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#FF7C7C'];
 
+    // Group expenses by date with day filtering
+    const getExpensesGroupedByDate = () => {
+        const currentDate = new Date();
+        const cutoffDate = new Date(currentDate.getTime() - (daysToShow * 24 * 60 * 60 * 1000));
+        
+        const filteredExpenses = expenses.filter(expense => {
+            const expenseDate = new Date(expense.date);
+            return expenseDate >= cutoffDate;
+        });
+
+        const grouped = filteredExpenses.reduce((acc, expense) => {
+            const date = formatDateForDisplay(expense.date);
+            if (!acc[date]) {
+                acc[date] = [];
+            }
+            acc[date].push(expense);
+            return acc;
+        }, {} as Record<string, Expense[]>);
+
+        // Sort dates in descending order (most recent first)
+        const sortedDates = Object.keys(grouped).sort((a, b) => {
+            const dateA = new Date(a.split('/').reverse().join('-'));
+            const dateB = new Date(b.split('/').reverse().join('-'));
+            return dateB.getTime() - dateA.getTime();
+        });
+
+        return sortedDates.map(date => ({
+            date,
+            expenses: grouped[date].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+            total: grouped[date].reduce((sum, expense) => sum + expense.amount, 0)
+        }));
+    };
+
     if (loading) {
         return (
             <div className="p-6 max-w-6xl mx-auto">
@@ -207,6 +277,7 @@ export default function ExpenseList() {
             <div className="flex justify-between items-center mb-8">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Expenses</h1>
+                    <p className="text-lg font-medium text-primary">Today: {formatDateForDisplay(getTodayString())}</p>
                     <p className="text-muted-foreground mt-2">
                         Track and manage your expenses
                     </p>
@@ -376,6 +447,25 @@ export default function ExpenseList() {
                 </Dialog>
             </div>
 
+            {/* Summary Card */}
+            <Card className="mb-6">
+                <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h3 className="text-lg font-semibold text-muted-foreground">Current Month Spending</h3>
+                            <p className="text-3xl font-bold text-primary mt-2">
+                                ${getCurrentMonthSpending().toFixed(2)}
+                            </p>
+                        </div>
+                        <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
+                            <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                            </svg>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
             {/* Charts Section */}
             {expenses.length > 0 && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
@@ -451,54 +541,104 @@ export default function ExpenseList() {
                 <Card>
                     <CardContent className="p-0">
                         <div className="divide-y">
-                            {expenses.map((expense: Expense) => (
-                                <div key={expense.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors">
-                                    <div className="flex items-center space-x-3">
-                                        <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                                            <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                            {getExpensesGroupedByDate().map((group) => (
+                                <div key={group.date}>
+                                    {/* Date header with total - clickable */}
+                                    <button
+                                        onClick={() => toggleDateCollapse(group.date)}
+                                        className="w-full bg-muted/30 px-4 py-3 flex justify-between items-center hover:bg-muted/50 transition-colors text-left"
+                                    >
+                                        <div className="flex items-center space-x-2">
+                                            <svg 
+                                                className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${
+                                                    collapsedDates.has(group.date) ? 'rotate-0' : 'rotate-90'
+                                                }`} 
+                                                fill="none" 
+                                                stroke="currentColor" 
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                             </svg>
+                                            <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
+                                                {group.date}
+                                            </h3>
                                         </div>
-                                        <div>
-                                            <h3 className="font-medium">{expense.description}</h3>
-                                            <p className="text-sm text-muted-foreground">
-                                                {expense.category} • {formatDateForDisplay(expense.date)}
-                                                {expense.account && (
-                                                    <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                                                        {expense.account.name}
-                                                    </span>
-                                                )}
-                                            </p>
+                                        <div className="flex items-center space-x-2">
+                                            <span className="text-xs text-muted-foreground">
+                                                {group.expenses.length} {group.expenses.length === 1 ? 'expense' : 'expenses'}
+                                            </span>
+                                            <span className="font-bold text-sm">
+                                                ${group.total.toFixed(2)}
+                                            </span>
                                         </div>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                        <div className="text-right">
-                                            <p className="font-bold text-lg">${expense.amount.toFixed(2)}</p>
+                                    </button>
+                                    {/* Expenses for this date - collapsible */}
+                                    {!collapsedDates.has(group.date) && (
+                                        <div className="divide-y divide-border/50">
+                                            {group.expenses.map((expense: Expense) => (
+                                                <div key={expense.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors">
+                                                    <div className="flex items-center space-x-3">
+                                                        <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                                                            <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                                                            </svg>
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="font-medium">{expense.description}</h3>
+                                                            <p className="text-sm text-muted-foreground">
+                                                                {expense.category}
+                                                                {expense.account && (
+                                                                    <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                                                        {expense.account.name}
+                                                                    </span>
+                                                                )}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center space-x-2">
+                                                        <div className="text-right">
+                                                            <p className="font-bold text-lg">${expense.amount.toFixed(2)}</p>
+                                                        </div>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => handleEdit(expense)}
+                                                            className="h-8 w-8 p-0"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                            </svg>
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => handleDelete(expense.id)}
+                                                            className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                            </svg>
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleEdit(expense)}
-                                            className="h-8 w-8 p-0"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                            </svg>
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleDelete(expense.id)}
-                                            className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                            </svg>
-                                        </Button>
-                                    </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
+                        {/* Load More Button */}
+                        {hasMoreTransactions() && (
+                            <div className="p-4 border-t">
+                                <Button 
+                                    onClick={handleLoadMore}
+                                    variant="outline"
+                                    className="w-full"
+                                >
+                                    Load More Transactions
+                                </Button>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             )}

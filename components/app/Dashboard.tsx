@@ -38,7 +38,18 @@ export default function Dashboard() {
         }).catch(() => setLoading(false));
     }, []);
 
-    const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+    const currentMonthExpenses = (() => {
+        const currentDate = new Date();
+        const currentMonth = currentDate.getMonth();
+        const currentYear = currentDate.getFullYear();
+        
+        return expenses
+            .filter(expense => {
+                const expenseDate = parseUTCDate(expense.date);
+                return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+            })
+            .reduce((total, expense) => total + expense.amount, 0);
+    })();
     const totalAssets = accounts.reduce((sum, account) => sum + account.balance, 0);
     const totalCategories = categories.length;
     const totalAccounts = accounts.length;
@@ -100,28 +111,28 @@ export default function Dashboard() {
                 <div className="bg-white p-4 rounded-lg shadow">
                     <div className="flex items-center space-x-2 mb-2">
                         <DollarSign className="w-5 h-5 text-red-600" />
-                        <h2 className="text-xl font-semibold">Total Expenses</h2>
+                        <h2 className="text-xl font-semibold">This Month</h2>
                     </div>
-                    <p className="text-2xl font-bold text-red-600">${totalExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                    <p className="text-2xl font-bold text-red-600">${currentMonthExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow">
                     <div className="flex items-center space-x-2 mb-2">
                         <Wallet className="w-5 h-5 text-green-600" />
-                        <h2 className="text-xl font-semibold">Total Assets</h2>
+                        <h2 className="text-xl font-semibold">Current Assets</h2>
                     </div>
                     <p className="text-2xl font-bold text-green-600">${totalAssets.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow">
                     <div className="flex items-center space-x-2 mb-2">
                         <Tag className="w-5 h-5 text-blue-600" />
-                        <h2 className="text-xl font-semibold">Total Categories</h2>
+                        <h2 className="text-xl font-semibold">Categories</h2>
                     </div>
                     <p className="text-2xl font-bold text-blue-600">{totalCategories}</p>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow">
                     <div className="flex items-center space-x-2 mb-2">
                         <CreditCard className="w-5 h-5 text-purple-600" />
-                        <h2 className="text-xl font-semibold">Total Accounts</h2>
+                        <h2 className="text-xl font-semibold">Bank Accounts</h2>
                     </div>
                     <p className="text-2xl font-bold text-purple-600">{totalAccounts}</p>
                 </div>
