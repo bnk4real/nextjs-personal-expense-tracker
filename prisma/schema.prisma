@@ -76,10 +76,32 @@ model subscriptions {
   people            people    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   categoryId        Int?
   category          Category? @relation(fields: [categoryId], references: [id])
+  payments          SubscriptionPayment[]
 
   @@index([next_payment_date])
   @@index([user_id])
   @@index([status])
+}
+
+model SubscriptionPayment {
+  id              String    @id @default(uuid()) @db.Uuid
+  subscriptionId  String    @db.Uuid
+  amount          Int       // price in cents
+  currency        String    @default("USD")
+  paymentDate     DateTime? // actual payment date
+  dueDate         DateTime  // scheduled due date
+  status          String    @default("pending") // 'paid', 'pending', 'overdue', 'cancelled'
+  paymentMethod   String?   // optional payment method
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  subscription    subscriptions @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  
+  @@index([subscriptionId])
+  @@index([paymentDate])
+  @@index([dueDate])
+  @@index([status])
+  @@index([subscriptionId, status])
 }
 
 model Expense {

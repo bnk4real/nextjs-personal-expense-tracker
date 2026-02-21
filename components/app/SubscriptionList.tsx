@@ -10,9 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, Edit, Trash2, Calendar, DollarSign, ExternalLink, Table, Layout, List, Filter } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, DollarSign, CreditCard, Clock, TrendingUp, AlertCircle, CheckCircle, XCircle, RefreshCw, List, Filter, ChevronDown, User, History, ExternalLink, Table, Layout } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { formatDateForDisplay } from '@/lib/format_date';
+import { formatPaymentAmount, getUpcomingPayments, getOverduePayments, PaymentSchedule } from '@/lib/recurring-payments';
 import { toast } from "sonner";
 
 interface Subscription {
@@ -39,6 +40,19 @@ interface Subscription {
 interface Category {
     id: number;
     name: string;
+}
+
+interface SubscriptionPayment {
+    id: string;
+    subscriptionId: string;
+    amount: number;
+    currency: string;
+    dueDate: string;
+    paymentDate?: string;
+    status: 'pending' | 'paid' | 'overdue' | 'cancelled';
+    paymentMethod?: string;
+    createdAt: string;
+    updatedAt: string;
 }
 
 const billingCycles = [
@@ -110,6 +124,10 @@ export default function SubscriptionList() {
     const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
     const [currentView, setCurrentView] = useState<'table' | 'card' | 'list'>('table');
     const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<number>>(new Set());
+    const [showPaymentsModal, setShowPaymentsModal] = useState(false);
+    const [selectedSubscriptionPayments, setSelectedSubscriptionPayments] = useState<SubscriptionPayment[]>([]);
+    const [upcomingPaymentList, setUpcomingPaymentList] = useState<PaymentSchedule[]>([]);
+    const [overduePaymentList, setOverduePaymentList] = useState<PaymentSchedule[]>([]);
     const [formData, setFormData] = useState({
         name: '',
         provider: '',
@@ -354,6 +372,96 @@ export default function SubscriptionList() {
         setSelectedCategoryIds(new Set());
     };
 
+    // Payment management functions
+    const fetchSubscriptionPayments = async (subscriptionId: string) => {
+        try {
+            const response = await fetch(`/api/subscriptions/${subscriptionId}/payments?includeUpcoming=true&includeOverdue=true`);
+            if (response.ok) {
+                const data = await response.json();
+                setSelectedSubscriptionPayments(data.payments || []);
+                setUpcomingPaymentList(data.upcoming || []);
+                setOverduePaymentList(data.overdue || []);
+            }
+        } catch {
+            toast.error("Failed to fetch payment history");
+        }
+    };
+
+    const handleViewPayments = (subscription: Subscription) => {
+        setEditingSubscription(subscription);
+        fetchSubscriptionPayments(subscription.id);
+        setShowPaymentsModal(true);
+    };
+
+    const handleMarkPaymentPaid = async (paymentId: string) => {
+        try {
+            const response = await fetch(`/api/subscriptions/payments/${paymentId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    status: 'paid',
+                    paymentMethod: 'manual'
+                }),
+            });
+            if (response.ok) {
+                toast.success("Payment marked as paid!");
+                if (editingSubscription) {
+                    fetchSubscriptionPayments(editingSubscription.id);
+                }
+                fetchSubscriptions(); // Refresh subscriptions to update next payment dates
+            } else {
+                toast.error("Failed to update payment");
+            }
+        } catch (error) {
+            toast.error("Failed to update payment");
+        }
+    };
+
+    const generateFuturePayments = async () => {
+        try {
+            const response = await fetch('/api/subscriptions/payments', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    monthsAhead: 12
+                }),
+            });
+            if (response.ok) {
+                const data = await response.json();
+                toast.success(`Generated ${data.payments.length} future payments!`);
+            } else {
+                toast.error("Failed to generate payments");
+            }
+        } catch {
+            toast.error("Failed to generate payments");
+        }
+    };
+
+    const migrateExistingPayments = async () => {
+        try {
+            const response = await fetch('/api/admin/migrate-payments', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                toast.success(`Migration completed! Created ${data.summary.totalPaymentsCreated} payments for ${data.summary.totalSubscriptions} subscriptions.`);
+                fetchSubscriptions(); // Refresh the subscriptions list
+            } else {
+                const errorData = await response.json();
+                toast.error(`Migration failed: ${errorData.error}`);
+            }
+        } catch {
+            toast.error("Failed to migrate payments");
+        }
+    };
+
     if (loading) {
         return (
             <div className="p-6 max-w-6xl mx-auto">
@@ -367,6 +475,14 @@ export default function SubscriptionList() {
     const filteredSubscriptions = getFilteredSubscriptions();
     const totalMonthly = getTotalMonthlyCost(filteredSubscriptions);
     const upcomingPayments = getUpcomingPayments(filteredSubscriptions);
+
+    // Check if user has existing subscriptions but likely no payment history
+    const hasExistingSubscriptions = subscriptions.length > 0;
+    const shouldShowMigrationAlert = hasExistingSubscriptions && subscriptions.some(sub => {
+        const startDate = new Date(sub.start_date);
+        const daysSinceStart = Math.floor((new Date().getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        return daysSinceStart > 30; // Subscriptions older than 30 days likely have payment history
+    });
 
     return (
         <div className="p-6 max-w-6xl mx-auto">
@@ -603,6 +719,32 @@ export default function SubscriptionList() {
                 </div>
             </div>
 
+            {/* Migration Alert */}
+            {shouldShowMigrationAlert && (
+                <Card className="mb-6 border-orange-200 bg-orange-50">
+                    <CardHeader>
+                        <CardTitle className="text-orange-800 flex items-center">
+                            <Calendar className="w-5 h-5 mr-2" />
+                            Import Your Payment History
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <p className="text-orange-700 mb-4">
+                            We detected you have existing subscriptions. Would you like to import your payment history?
+                            This will create payment records based on your subscription start dates and billing cycles.
+                        </p>
+                        <div className="flex space-x-2">
+                            <Button onClick={migrateExistingPayments} className="bg-orange-600 hover:bg-orange-700">
+                                Import Payment History
+                            </Button>
+                            <Button variant="outline" onClick={() => setShowPaymentsModal(true)}>
+                                Learn More
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <Card>
@@ -661,7 +803,7 @@ export default function SubscriptionList() {
                                     <span className="font-medium">{payment.subscription.name}</span>
                                     <div className="flex items-center space-x-2">
                                         <span className="text-sm text-muted-foreground">
-                                            ${(payment.subscription.price_cents / 100).toFixed(2)} on {formatDateForDisplay(payment.paymentDate.toISOString())}
+                                            {formatPaymentAmount(payment.subscription.price_cents, payment.subscription.currency)} on {formatDateForDisplay(payment.paymentDate.toISOString())}
                                         </span>
                                     </div>
                                 </div>
@@ -709,9 +851,7 @@ export default function SubscriptionList() {
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Service</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
-                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cycle</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Payment</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -741,18 +881,10 @@ export default function SubscriptionList() {
                                                         <div className="text-sm text-gray-900">{subscription.provider || '-'}</div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm text-gray-900">${(subscription.price_cents / 100).toFixed(2)} {subscription.currency}</div>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <Badge variant="outline">{subscription.billing_cycle}</Badge>
+                                                        <div className="text-sm text-gray-900">{formatPaymentAmount(subscription.price_cents, subscription.currency)}</div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="text-sm text-gray-900">{subscription.category?.name || '-'}</div>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <div className="text-sm text-gray-900">
-                                                            {subscription.start_date ? formatDateForDisplay(subscription.start_date) : '-'}
-                                                        </div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <div className="text-sm text-gray-900">
@@ -770,6 +902,14 @@ export default function SubscriptionList() {
                                                                 onClick={() => handleEdit(subscription)}
                                                             >
                                                                 <Edit className="w-4 h-4" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => handleViewPayments(subscription)}
+                                                                title="View Payment History"
+                                                            >
+                                                                <CreditCard className="w-4 h-4" />
                                                             </Button>
                                                             <Button
                                                                 variant="outline"
@@ -826,7 +966,7 @@ export default function SubscriptionList() {
                                                 )}
                                             </div>
                                             <div className="text-sm text-gray-600 space-y-1">
-                                                <p>Price: ${(subscription.price_cents / 100).toFixed(2)} {subscription.currency}</p>
+                                                <p>Price: {formatPaymentAmount(subscription.price_cents, subscription.currency)}</p>
                                                 {subscription.start_date && <p>Started: {formatDateForDisplay(subscription.start_date)}</p>}
                                                 {subscription.next_payment_date && (
                                                     <p>Next Payment: {formatDateForDisplay(subscription.next_payment_date)}</p>
@@ -919,7 +1059,7 @@ export default function SubscriptionList() {
                                                 )}
                                                 <Badge variant={subscription.status === 'active' ? 'default' : 'secondary'} className="text-xs">{subscription.status}</Badge>
                                                 <span className="text-sm font-medium text-green-600">
-                                                    ${(subscription.price_cents / 100).toFixed(2)} {subscription.currency}
+                                                    {formatPaymentAmount(subscription.price_cents, subscription.currency)}
                                                 </span>
                                                 {subscription.start_date && (
                                                     <span className="text-sm text-gray-500">
@@ -959,151 +1099,368 @@ export default function SubscriptionList() {
             )}
 
             {/* Edit Modal */}
-            <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Edit Subscription</DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleEditSubmit} className="space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-name">Service Name</Label>
-                            <Input
-                                id="edit-name"
-                                value={formData.name}
-                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                placeholder="Netflix, Spotify, etc."
-                                required
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-provider">Provider (Optional)</Label>
-                            <Input
-                                id="edit-provider"
-                                value={formData.provider}
-                                onChange={(e) => setFormData({ ...formData, provider: e.target.value })}
-                                placeholder="Company name"
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="edit-price">Price</Label>
-                                <Input
-                                    id="edit-price"
-                                    type="number"
-                                    step="0.01"
-                                    value={formData.price_cents}
-                                    onChange={(e) => setFormData({ ...formData, price_cents: e.target.value })}
-                                    placeholder="9.99"
-                                    required
-                                />
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label htmlFor="edit-currency">Currency</Label>
-                                <Select value={formData.currency} onValueChange={(value) => setFormData({ ...formData, currency: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {currencies.map((currency) => (
-                                            <SelectItem key={currency} value={currency}>
-                                                {currency}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-billing_cycle">Billing Cycle</Label>
-                            <Select value={formData.billing_cycle} onValueChange={(value) => setFormData({ ...formData, billing_cycle: value })}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {billingCycles.map((cycle) => (
-                                        <SelectItem key={cycle} value={cycle}>
-                                            {cycle.charAt(0).toUpperCase() + cycle.slice(1)}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-category">Category (Optional)</Label>
-                            <Select value={formData.categoryId} onValueChange={(value) => setFormData({ ...formData, categoryId: value })}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select a category" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {categories.map((category) => (
-                                        <SelectItem key={category.id} value={category.id.toString()}>
-                                            {category.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-start_date">Start Date</Label>
-                            <Input
-                                id="edit-start_date"
-                                type="date"
-                                value={formData.start_date}
-                                onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-status">Status</Label>
-                            <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="active">Active</SelectItem>
-                                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                                    <SelectItem value="paused">Paused</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-website">Website URL (Optional)</Label>
-                            <Input
-                                id="edit-website"
-                                type="url"
-                                value={formData.website_url}
-                                onChange={(e) => setFormData({ ...formData, website_url: e.target.value })}
-                                placeholder="https://example.com"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-notes">Notes (Optional)</Label>
-                            <Textarea
-                                id="edit-notes"
-                                value={formData.notes}
-                                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                                placeholder="Additional notes about this subscription"
-                                rows={3}
-                            />
-                        </div>
-
-                        <div className="flex justify-end space-x-2 pt-4">
-                            <Button type="button" variant="outline" onClick={handleModalClose}>
-                                Cancel
+            {editModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+                    <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-6 border-b bg-white">
+                            <h2 className="text-xl font-bold text-gray-900">Edit Subscription</h2>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setEditModalOpen(false)}
+                                className="text-gray-500 hover:text-gray-700"
+                            >
+                                ✕
                             </Button>
-                            <Button type="submit">Update Subscription</Button>
                         </div>
-                    </form>
-                </DialogContent>
-            </Dialog>
+                        
+                        {/* Content */}
+                        <div className="p-6">
+                            <form onSubmit={handleEditSubmit} className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-name">Service Name</Label>
+                                    <Input
+                                        id="edit-name"
+                                        value={formData.name}
+                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                        placeholder="Netflix, Spotify, etc."
+                                        required
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-provider">Provider (Optional)</Label>
+                                    <Input
+                                        id="edit-provider"
+                                        value={formData.provider}
+                                        onChange={(e) => setFormData({ ...formData, provider: e.target.value })}
+                                        placeholder="Company name"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="edit-price">Price</Label>
+                                        <Input
+                                            id="edit-price"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.price_cents}
+                                            onChange={(e) => setFormData({ ...formData, price_cents: e.target.value })}
+                                            placeholder="9.99"
+                                            required
+                                        />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label htmlFor="edit-currency">Currency</Label>
+                                        <Select value={formData.currency} onValueChange={(value) => setFormData({ ...formData, currency: value })}>
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {currencies.map((currency) => (
+                                                    <SelectItem key={currency} value={currency}>
+                                                        {currency}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-billing_cycle">Billing Cycle</Label>
+                                    <Select value={formData.billing_cycle} onValueChange={(value) => setFormData({ ...formData, billing_cycle: value })}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {billingCycles.map((cycle) => (
+                                                <SelectItem key={cycle} value={cycle}>
+                                                    {cycle.charAt(0).toUpperCase() + cycle.slice(1)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-category">Category (Optional)</Label>
+                                    <Select value={formData.categoryId} onValueChange={(value) => setFormData({ ...formData, categoryId: value })}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select a category" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {categories.map((category) => (
+                                                <SelectItem key={category.id} value={category.id.toString()}>
+                                                    {category.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-start_date">Start Date</Label>
+                                    <Input
+                                        id="edit-start_date"
+                                        type="date"
+                                        value={formData.start_date}
+                                        onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-status">Status</Label>
+                                    <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="active">Active</SelectItem>
+                                            <SelectItem value="cancelled">Cancelled</SelectItem>
+                                            <SelectItem value="paused">Paused</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-website">Website URL (Optional)</Label>
+                                    <Input
+                                        id="edit-website"
+                                        type="url"
+                                        value={formData.website_url}
+                                        onChange={(e) => setFormData({ ...formData, website_url: e.target.value })}
+                                        placeholder="https://example.com"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-notes">Notes (Optional)</Label>
+                                    <Textarea
+                                        id="edit-notes"
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                        placeholder="Additional notes about this subscription"
+                                        rows={3}
+                                    />
+                                </div>
+
+                                <div className="flex justify-end space-x-2 pt-4">
+                                    <Button type="button" variant="outline" onClick={handleModalClose}>
+                                        Cancel
+                                    </Button>
+                                    <Button type="submit">Update Subscription</Button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Payment History Modal */}
+            {showPaymentsModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
+                    <div className="w-full h-full max-w-3xl max-h-full bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col">
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-2 md:p-3 border-b bg-white">
+                            <div className="flex-1 min-w-0">
+                                <h2 className="text-sm md:text-base font-bold text-gray-900 truncate">
+                                    <CreditCard className="w-3 h-3 mr-1 text-blue-600 inline" />
+                                    <span className="truncate">Payment History - {editingSubscription?.name}</span>
+                                </h2>
+                            </div>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setShowPaymentsModal(false)}
+                                className="text-gray-500 hover:text-gray-700 shrink-0 p-1"
+                            >
+                                ✕
+                            </Button>
+                        </div>
+                        
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto p-2 md:p-3">
+                            <div className="space-y-2 max-w-3xl mx-auto">
+                                {/* Migration and Generation Buttons */}
+                                <div className="bg-gray-50 rounded-lg p-3 md:p-4 border">
+                                    <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-3">
+                                        <div>
+                                            <h3 className="text-sm font-semibold mb-1">Payment Management</h3>
+                                            <p className="text-gray-600 text-xs hidden md:block">
+                                                Import past payments and generate future payment schedules
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                            <Button onClick={migrateExistingPayments} variant="outline" className="text-orange-600 border-orange-600 hover:bg-orange-50 text-xs px-2 py-1 w-full sm:w-auto">
+                                                <RefreshCw className="w-3 h-3 mr-1 text-orange-600" />
+                                                Migrate
+                                            </Button>
+                                            <Button onClick={generateFuturePayments} variant="outline" className="hover:bg-blue-50 text-xs px-2 py-1 w-full sm:w-auto">
+                                                <Plus className="w-3 h-3 mr-1 text-blue-600" />
+                                                Generate
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Payment Summary Cards */}
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <Card className="bg-green-50 border-green-200">
+                                        <CardContent className="p-2">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-xs text-green-600 font-medium">Paid</p>
+                                                    <p className="text-base font-bold text-green-700">
+                                                        {selectedSubscriptionPayments.filter(p => p.status === 'paid').length}
+                                                    </p>
+                                                </div>
+                                                <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center">
+                                                    <CheckCircle className="w-2.5 h-2.5 text-green-600" />
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+
+                                    <Card className="bg-blue-50 border-blue-200">
+                                        <CardContent className="p-2">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-xs text-blue-600 font-medium">Pending</p>
+                                                    <p className="text-base font-bold text-blue-700">
+                                                        {selectedSubscriptionPayments.filter(p => p.status === 'pending').length}
+                                                    </p>
+                                                </div>
+                                                <div className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center">
+                                                    <Clock className="w-2.5 h-2.5 text-blue-600" />
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+
+                                    <Card className="bg-purple-50 border-purple-200">
+                                        <CardContent className="p-2">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-xs text-purple-600 font-medium">Total</p>
+                                                    <p className="text-base font-bold text-purple-700">
+                                                        {formatPaymentAmount(
+                                                            selectedSubscriptionPayments.reduce((sum, p) => sum + p.amount, 0),
+                                                            selectedSubscriptionPayments[0]?.currency || 'USD'
+                                                        )}
+                                                    </p>
+                                                </div>
+                                                <div className="w-5 h-5 bg-purple-100 rounded-full flex items-center justify-center">
+                                                    <DollarSign className="w-2.5 h-2.5 text-purple-600" />
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+
+                                {/* Payment History */}
+                                <Card className="border">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm flex items-center">
+                                            <TrendingUp className="w-3 h-3 mr-2" />
+                                            <span className="truncate">Payment History</span>
+                                        </CardTitle>
+                                        <p className="text-gray-600 mt-1 text-xs">
+                                            Payment transactions
+                                        </p>
+                                    </CardHeader>
+                                    <CardContent className="pt-0">
+                                        {selectedSubscriptionPayments.length === 0 ? (
+                                            <div className="text-center py-8 md:py-12">
+                                                <div className="w-12 h-12 md:w-16 md:h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3 md:mb-4">
+                                                    <AlertCircle className="w-6 h-6 md:w-8 md:h-8 text-gray-400" />
+                                                </div>
+                                                <h3 className="text-base md:text-lg font-bold text-gray-900 mb-2">No Payment History</h3>
+                                                <p className="text-gray-500 mb-3 md:mb-4 max-w-lg mx-auto text-xs md:text-sm">
+                                                    Start by migrating your existing payments or generating future payment schedules.
+                                                </p>
+                                                <div className="flex flex-col sm:flex-row justify-center gap-2">
+                                                    <Button onClick={migrateExistingPayments} variant="outline" className="text-orange-600 border-orange-600 hover:bg-orange-50 text-sm px-4 py-2 w-full sm:w-auto">
+                                                        <RefreshCw className="w-3 h-3 mr-1 text-orange-600" />
+                                                        Migrate
+                                                    </Button>
+                                                    <Button onClick={generateFuturePayments} variant="outline" className="hover:bg-blue-50 text-sm px-4 py-2 w-full sm:w-auto">
+                                                        <Plus className="w-3 h-3 mr-1 text-blue-600" />
+                                                        Generate
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2 pr-2">
+                                                {selectedSubscriptionPayments.map((payment) => (
+                                                    <div key={payment.id} className="flex flex-col md:flex-row md:justify-between md:items-start p-4 border rounded-lg hover:bg-gray-50 transition-colors">
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="mb-2">
+                                                                <div className="flex flex-col md:flex-row md:items-start md:space-x-3 mb-2">
+                                                                    <span className="text-xs md:text-sm font-semibold text-gray-900">
+                                                                        {payment.status === 'paid' ? <><CheckCircle className="w-3 h-3 md:w-4 md:h-4 mr-1 text-green-600" /> Paid</> : <><Clock className="w-3 h-3 md:w-4 md:h-4 mr-1 text-blue-600" /> Due</>}: 
+                                                                        <span className="block md:inline">{formatDateForDisplay(payment.dueDate)}</span>
+                                                                    </span>
+                                                                    {payment.paymentDate && payment.status === 'paid' && (
+                                                                        <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full font-semibold mt-1 md:mt-0">
+                                                                            Paid on: {formatDateForDisplay(payment.paymentDate)}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex flex-col md:flex-row md:items-center space-y-1 md:space-y-0 md:space-x-4 text-xs text-gray-600">
+                                                                    {payment.paymentMethod && (
+                                                                        <span className="flex items-center">
+                                                                            <CreditCard className="w-3 h-3 mr-1 text-gray-600" />
+                                                                            <span className="font-medium">via {payment.paymentMethod}</span>
+                                                                        </span>
+                                                                    )}
+                                                                    <span className="flex items-center">
+                                                                        <Calendar className="w-3 h-3 mr-1 text-gray-600" />
+                                                                        <span className="font-medium">Created: {formatDateForDisplay(payment.createdAt)}</span>
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex flex-col md:flex-col md:items-end space-y-2 md:space-y-2 md:ml-0 md:ml-8">
+                                                            <div className="text-left md:text-right">
+                                                                <p className="text-sm md:text-lg font-bold text-gray-900">
+                                                                    {formatPaymentAmount(payment.amount, payment.currency)}
+                                                                </p>
+                                                                <p className="text-xs text-gray-500 font-semibold">{payment.currency}</p>
+                                                            </div>
+                                                            <div className="flex flex-col md:flex-row items-start md:items-center space-y-2 md:space-y-0 md:space-x-2">
+                                                                <Badge 
+                                                                    variant={payment.status === 'paid' ? 'default' : 
+                                                                            payment.status === 'overdue' ? 'destructive' : 'secondary'}
+                                                                    className="min-w-16 md:min-w-20 text-center py-1 md:py-1 text-xs font-semibold"
+                                                                >
+                                                                    {payment.status}
+                                                                </Badge>
+                                                                {payment.status === 'pending' && (
+                                                                    <Button
+                                                                        size="sm"
+                                                                        onClick={() => handleMarkPaymentPaid(payment.id)}
+                                                                        className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 md:px-3 md:py-1 text-xs w-full md:w-auto"
+                                                                    >
+                                                                        ✓ Mark Paid
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
