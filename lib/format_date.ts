@@ -1,20 +1,66 @@
 /**
- * Date utility functions for handling UTC dates consistently across the app
+ * Date utility functions for date-only values.
+ *
+ * Expenses store a calendar day as a string. Treating those strings as UTC
+ * instants shifts the visible day in non-UTC timezones, so these helpers keep
+ * date-only values anchored to the local calendar.
  */
 
-/**
- * Parse a date string (YYYY-MM-DD) and return a Date object at UTC midnight
- */
-export function parseUTCDate(dateString: string): Date {
-  const [year, month, day] = dateString.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
+const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})/;
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function formatLocalDateKey(date: Date): string {
+  return [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+  ].join('-');
 }
 
 /**
- * Create a UTC date at midnight for the given Date object
+ * Normalize a string or Date to YYYY-MM-DD.
+ */
+export function getDateKey(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return '';
+
+  if (dateInput instanceof Date) {
+    if (isNaN(dateInput.getTime())) return '';
+    return formatLocalDateKey(dateInput);
+  }
+
+  const dateOnlyMatch = dateInput.match(DATE_KEY_PATTERN);
+  if (dateOnlyMatch) {
+    return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`;
+  }
+
+  const parsedDate = new Date(dateInput);
+  if (isNaN(parsedDate.getTime())) return '';
+  return formatLocalDateKey(parsedDate);
+}
+
+/**
+ * Parse a date string and return a Date object at local midnight.
+ */
+export function parseUTCDate(dateString: string): Date {
+  const dateKey = getDateKey(dateString);
+  if (!dateKey) return new Date(NaN);
+
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+/**
+ * Create a local date at midnight for the given Date object.
  */
 export function toUTCMidnight(date: Date): Date {
-  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dateKey = getDateKey(date);
+  if (!dateKey) return new Date(NaN);
+
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
 }
 
 /**
@@ -30,16 +76,10 @@ export function formatDateForDisplay(dateInput: string | Date | null | undefined
   }
 
   if (typeof dateInput === 'string') {
-    // For YYYY-MM-DD format stored as UTC, convert to local date for display
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-      const localDate = utcStringToLocalDate(dateInput);
+    const dateKey = getDateKey(dateInput);
+    if (dateKey) {
+      const localDate = utcStringToLocalDate(dateKey);
       return localDate.toLocaleDateString();
-    }
-
-    // Try to parse as ISO string or other formats
-    const date = new Date(dateInput);
-    if (!isNaN(date.getTime())) {
-      return date.toLocaleDateString();
     }
   }
 
@@ -47,7 +87,7 @@ export function formatDateForDisplay(dateInput: string | Date | null | undefined
 }
 
 /**
- * Check if two dates represent the same day in UTC
+ * Check if two dates represent the same local calendar day.
  */
 export function isSameUTCDay(date1: Date, date2: Date): boolean {
   const utc1 = toUTCMidnight(date1);
@@ -56,12 +96,10 @@ export function isSameUTCDay(date1: Date, date2: Date): boolean {
 }
 
 /**
- * Check if a date string (YYYY-MM-DD) matches a Date object in UTC
+ * Check if a date string (YYYY-MM-DD) matches a Date object by calendar day.
  */
 export function doesDateStringMatchUTC(dateString: string, date: Date): boolean {
-  const expenseDate = parseUTCDate(dateString);
-  const selectedUTC = toUTCMidnight(date);
-  return expenseDate.getTime() === selectedUTC.getTime();
+  return getDateKey(dateString) === getDateKey(date);
 }
 
 /**
@@ -76,22 +114,19 @@ export function getTodayString(): string {
 }
 
 /**
- * Convert a local date string (YYYY-MM-DD) to UTC date string for storage
+ * Normalize a local date string (YYYY-MM-DD) for storage.
  */
 export function localDateToUTCString(dateString: string): string {
-  const [year, month, day] = dateString.split('-').map(Number);
-  const localDate = new Date(year, month - 1, day);
-  const utcDate = new Date(localDate.getTime() - (localDate.getTimezoneOffset() * 60000));
-  const utcYear = utcDate.getUTCFullYear();
-  const utcMonth = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
-  const utcDay = String(utcDate.getUTCDate()).padStart(2, '0');
-  return `${utcYear}-${utcMonth}-${utcDay}`;
+  return getDateKey(dateString);
 }
 
 /**
- * Convert a UTC date string (YYYY-MM-DD) to local date for display
+ * Convert a date string (YYYY-MM-DD) to a local date for display.
  */
 export function utcStringToLocalDate(dateString: string): Date {
-  const [year, month, day] = dateString.split('-').map(Number);
+  const dateKey = getDateKey(dateString);
+  if (!dateKey) return new Date(NaN);
+
+  const [year, month, day] = dateKey.split('-').map(Number);
   return new Date(year, month - 1, day);
 }

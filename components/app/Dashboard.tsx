@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react';
 import { Expense, Account, Category, Subscription } from '@/lib/types';
 import Calendar from '@/lib/Calendar';
-import { doesDateStringMatchUTC, parseUTCDate, formatDateForDisplay } from '@/lib/format_date';
-import { DollarSign, Wallet, Tag, CreditCard } from 'lucide-react';
+import { doesDateStringMatchUTC, parseUTCDate, formatDateForDisplay, getTodayString, localDateToUTCString } from '@/lib/format_date';
+import { DollarSign, Wallet, Tag, CreditCard, Plus, TrendingUp } from 'lucide-react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 import {
     Dialog,
     DialogContent,
@@ -12,6 +14,18 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+const incomeSources = [
+    'Salary',
+    'Freelance',
+    'Investment',
+    'Business',
+    'Gift',
+    'Other',
+];
 
 export default function Dashboard() {
     const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -22,21 +36,123 @@ export default function Dashboard() {
     const [selectedDate, setSelectedDate] = useState<Date | undefined>();
     const [dialogOpen, setDialogOpen] = useState(false);
     const [selectedMonth, setSelectedMonth] = useState<string>('all');
+    const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
+    const [incomeDialogOpen, setIncomeDialogOpen] = useState(false);
+    const [expenseForm, setExpenseForm] = useState({
+        amount: '',
+        category: '',
+        date: getTodayString(),
+        description: '',
+        accountId: '',
+    });
+    const [incomeForm, setIncomeForm] = useState({
+        amount: '',
+        source: '',
+        date: getTodayString(),
+        description: '',
+        accountId: '',
+    });
 
-    useEffect(() => {
-        Promise.all([
+    const requestDashboardData = () => {
+        return Promise.all([
             fetch('/api/expenses').then(res => res.json()),
             fetch('/api/accounts').then(res => res.json()),
             fetch('/api/categories').then(res => res.json()),
             fetch('/api/subscriptions').then(res => res.json())
-        ]).then(([expensesData, accountsData, categoriesData, subscriptionsData]) => {
-            setExpenses(expensesData);
-            setAccounts(accountsData);
-            setCategories(categoriesData);
-            setSubscriptions(subscriptionsData);
-            setLoading(false);
-        }).catch(() => setLoading(false));
+        ]);
+    };
+
+    const applyDashboardData = ([expensesData, accountsData, categoriesData, subscriptionsData]: unknown[]) => {
+        setExpenses(Array.isArray(expensesData) ? expensesData : []);
+        setAccounts(Array.isArray(accountsData) ? accountsData : []);
+        setCategories(Array.isArray(categoriesData) ? categoriesData : []);
+        setSubscriptions(Array.isArray(subscriptionsData) ? subscriptionsData : []);
+        setLoading(false);
+    };
+
+    const refreshDashboardData = () => {
+        requestDashboardData()
+            .then(applyDashboardData)
+            .catch(() => setLoading(false));
+    };
+
+    useEffect(() => {
+        requestDashboardData()
+            .then(applyDashboardData)
+            .catch(() => setLoading(false));
     }, []);
+
+    const getMonthValue = (date: Date) => (date.getMonth() + 1).toString().padStart(2, '0');
+
+    const resetExpenseForm = () => {
+        setExpenseForm({
+            amount: '',
+            category: '',
+            date: getTodayString(),
+            description: '',
+            accountId: '',
+        });
+    };
+
+    const resetIncomeForm = () => {
+        setIncomeForm({
+            amount: '',
+            source: '',
+            date: getTodayString(),
+            description: '',
+            accountId: '',
+        });
+    };
+
+    const handleExpenseSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
+
+        const response = await fetch('/api/expenses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...expenseForm,
+                amount: parseFloat(expenseForm.amount),
+                date: localDateToUTCString(expenseForm.date),
+                accountId: expenseForm.accountId ? parseInt(expenseForm.accountId) : null,
+            }),
+        });
+
+        if (response.ok) {
+            toast.success('Expense added');
+            setExpenseDialogOpen(false);
+            resetExpenseForm();
+            refreshDashboardData();
+        } else {
+            const data = await response.json().catch(() => ({}));
+            toast.error(data.error || 'Failed to add expense');
+        }
+    };
+
+    const handleIncomeSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
+
+        const response = await fetch('/api/incomes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...incomeForm,
+                amount: parseFloat(incomeForm.amount),
+                date: localDateToUTCString(incomeForm.date),
+                accountId: incomeForm.accountId ? parseInt(incomeForm.accountId) : null,
+            }),
+        });
+
+        if (response.ok) {
+            toast.success('Income added');
+            setIncomeDialogOpen(false);
+            resetIncomeForm();
+            refreshDashboardData();
+        } else {
+            const data = await response.json().catch(() => ({}));
+            toast.error(data.error || 'Failed to add income');
+        }
+    };
 
     const currentMonthExpenses = (() => {
         const currentDate = new Date();
@@ -74,7 +190,7 @@ export default function Dashboard() {
         if (selectedMonth !== 'all') {
             filtered = filtered.filter(expense => {
                 const expenseDate = parseUTCDate(expense.date);
-                const month = (expenseDate.getMonth() + 1).toString().padStart(2, '0');
+                const month = getMonthValue(expenseDate);
                 return month === selectedMonth;
             });
         }
@@ -90,10 +206,13 @@ export default function Dashboard() {
         return filtered;
     })();
 
-    const expenseDates = expenses.map(expense => parseUTCDate(expense.date));
+    const expenseDates = expenses
+        .map(expense => parseUTCDate(expense.date))
+        .filter(date => !isNaN(date.getTime()));
     const subscriptionDates = subscriptions
         .filter(sub => sub.next_payment_date)
-        .map(sub => new Date(sub.next_payment_date!));
+        .map(sub => parseUTCDate(sub.next_payment_date!))
+        .filter(date => !isNaN(date.getTime()));
 
     const handleDateSelect = (date: Date | undefined) => {
         setSelectedDate(date);
@@ -106,7 +225,19 @@ export default function Dashboard() {
 
     return (
         <div className="p-6 max-w-6xl mx-auto">
-            <h1 className="text-3xl font-bold mb-6">Dashboard</h1>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+                <h1 className="text-3xl font-bold">Dashboard</h1>
+                <div className="flex flex-wrap gap-2">
+                    <Button onClick={() => setExpenseDialogOpen(true)} className="gap-2">
+                        <Plus className="h-4 w-4" />
+                        Expense
+                    </Button>
+                    <Button onClick={() => setIncomeDialogOpen(true)} variant="outline" className="gap-2">
+                        <TrendingUp className="h-4 w-4" />
+                        Income
+                    </Button>
+                </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
                 <div className="bg-white p-4 rounded-lg shadow">
                     <div className="flex items-center space-x-2 mb-2">
@@ -137,6 +268,171 @@ export default function Dashboard() {
                     <p className="text-2xl font-bold text-purple-600">{totalAccounts}</p>
                 </div>
             </div>
+
+            <Dialog open={expenseDialogOpen} onOpenChange={setExpenseDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Add Expense</DialogTitle>
+                        <DialogDescription>Record a quick expense from the dashboard.</DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleExpenseSubmit} className="space-y-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="quick-expense-description">Description</Label>
+                            <Input
+                                id="quick-expense-description"
+                                value={expenseForm.description}
+                                onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })}
+                                placeholder="Coffee, groceries, rent..."
+                                required
+                            />
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div className="space-y-2">
+                                <Label htmlFor="quick-expense-amount">Amount</Label>
+                                <Input
+                                    id="quick-expense-amount"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={expenseForm.amount}
+                                    onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })}
+                                    placeholder="0.00"
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="quick-expense-date">Date</Label>
+                                <Input
+                                    id="quick-expense-date"
+                                    type="date"
+                                    value={expenseForm.date}
+                                    onChange={(event) => setExpenseForm({ ...expenseForm, date: event.target.value })}
+                                    required
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Category</Label>
+                            <Select value={expenseForm.category} onValueChange={(value) => setExpenseForm({ ...expenseForm, category: value })}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select a category" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {categories.map((category) => (
+                                        <SelectItem key={category.id} value={category.name}>
+                                            {category.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Account</Label>
+                            <Select value={expenseForm.accountId} onValueChange={(value) => setExpenseForm({ ...expenseForm, accountId: value })}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="No account selected" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {accounts.map((account) => (
+                                        <SelectItem key={account.id} value={account.id.toString()}>
+                                            {account.name} (${account.balance.toFixed(2)})
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" onClick={() => setExpenseDialogOpen(false)}>
+                                Cancel
+                            </Button>
+                            <Button type="submit">Add Expense</Button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={incomeDialogOpen} onOpenChange={setIncomeDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Add Income</DialogTitle>
+                        <DialogDescription>Record money coming in and optionally update an account.</DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleIncomeSubmit} className="space-y-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="quick-income-description">Description</Label>
+                            <Input
+                                id="quick-income-description"
+                                value={incomeForm.description}
+                                onChange={(event) => setIncomeForm({ ...incomeForm, description: event.target.value })}
+                                placeholder="Paycheck, refund, transfer..."
+                                required
+                            />
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div className="space-y-2">
+                                <Label htmlFor="quick-income-amount">Amount</Label>
+                                <Input
+                                    id="quick-income-amount"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={incomeForm.amount}
+                                    onChange={(event) => setIncomeForm({ ...incomeForm, amount: event.target.value })}
+                                    placeholder="0.00"
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="quick-income-date">Date</Label>
+                                <Input
+                                    id="quick-income-date"
+                                    type="date"
+                                    value={incomeForm.date}
+                                    onChange={(event) => setIncomeForm({ ...incomeForm, date: event.target.value })}
+                                    required
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Source</Label>
+                            <Select value={incomeForm.source} onValueChange={(value) => setIncomeForm({ ...incomeForm, source: value })}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select a source" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {incomeSources.map((source) => (
+                                        <SelectItem key={source} value={source}>
+                                            {source}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Account</Label>
+                            <Select value={incomeForm.accountId} onValueChange={(value) => setIncomeForm({ ...incomeForm, accountId: value })}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="No account selected" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {accounts.map((account) => (
+                                        <SelectItem key={account.id} value={account.id.toString()}>
+                                            {account.name} (${account.balance.toFixed(2)})
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" onClick={() => setIncomeDialogOpen(false)}>
+                                Cancel
+                            </Button>
+                            <Button type="submit">Add Income</Button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white p-4 rounded-lg shadow">
                     <div className="flex justify-between items-center mb-4">
@@ -154,8 +450,8 @@ export default function Dashboard() {
                                     All
                                 </button>
                                 <button
-                                    onClick={() => setSelectedMonth(new Date().toISOString().slice(5, 7))}
-                                    className={`px-3 py-1 text-sm rounded ${selectedMonth === new Date().toISOString().slice(5, 7) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+                                    onClick={() => setSelectedMonth(getMonthValue(new Date()))}
+                                    className={`px-3 py-1 text-sm rounded ${selectedMonth === getMonthValue(new Date()) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
                                 >
                                     This Month
                                 </button>
@@ -163,12 +459,12 @@ export default function Dashboard() {
                                     onClick={() => {
                                         const now = new Date();
                                         const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                                        setSelectedMonth(lastMonth.toISOString().slice(5, 7));
+                                        setSelectedMonth(getMonthValue(lastMonth));
                                     }}
                                     className={`px-3 py-1 text-sm rounded ${(() => {
                                         const now = new Date();
                                         const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                                        return selectedMonth === lastMonth.toISOString().slice(5, 7);
+                                        return selectedMonth === getMonthValue(lastMonth);
                                     })() ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
                                 >
                                     Last Month

@@ -19,7 +19,8 @@ import {
     MessageCircle,
     ChevronDown,
     ChevronRight,
-    BarChart3
+    BarChart3,
+    Upload
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -65,6 +66,11 @@ const navigationItems: NavigationItem[] = [
         href: '/accounts',
         label: 'Accounts',
         icon: <Wallet className="w-5 h-5" />,
+    },
+    {
+        href: '/imports',
+        label: 'Imports',
+        icon: <Upload className="w-5 h-5" />,
     },
     {
         href: '/subscriptions',
