@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Badge } from '@/components/ui/badge';
 import { Calculator, MapPin, Info } from 'lucide-react';
 
@@ -132,11 +132,20 @@ const stateTaxData: StateTaxInfo[] = [
         propertyTax: 0.021
     }
 ];
+const filingStatusOptions = [
+    { value: 'single', label: 'Single' },
+    { value: 'married', label: 'Married Filing Jointly' },
+];
 
 export default function StateTaxInfo() {
     const [selectedState, setSelectedState] = useState<string>('');
     const [income, setIncome] = useState<string>('');
     const [filingStatus, setFilingStatus] = useState<'single' | 'married'>('single');
+    const stateOptions = stateTaxData.map((state) => ({
+        value: state.code,
+        label: state.state,
+        searchText: `${state.state} ${state.code}`,
+    }));
     const [calculatedTax, setCalculatedTax] = useState<number | null>(null);
 
     const selectedStateData = stateTaxData.find(s => s.code === selectedState);
@@ -183,18 +192,13 @@ export default function StateTaxInfo() {
                         <div className="space-y-4">
                             <div className="space-y-2">
                                 <Label htmlFor="state">Select State</Label>
-                                <Select value={selectedState} onValueChange={setSelectedState}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Choose a state" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {stateTaxData.map((state) => (
-                                            <SelectItem key={state.code} value={state.code}>
-                                                {state.state}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={selectedState}
+                                    onValueChange={setSelectedState}
+                                    options={stateOptions}
+                                    placeholder="Choose a state"
+                                    searchPlaceholder="Search states..."
+                                />
                             </div>
 
                             {selectedStateData && (
@@ -212,15 +216,12 @@ export default function StateTaxInfo() {
 
                                     <div className="space-y-2">
                                         <Label htmlFor="filingStatus">Filing Status</Label>
-                                        <Select value={filingStatus} onValueChange={(value: 'single' | 'married') => setFilingStatus(value)}>
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="single">Single</SelectItem>
-                                                <SelectItem value="married">Married Filing Jointly</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                        <SearchableSelect
+                                            value={filingStatus}
+                                            onValueChange={(value) => setFilingStatus(value as 'single' | 'married')}
+                                            options={filingStatusOptions}
+                                            searchPlaceholder="Search filing statuses..."
+                                        />
                                     </div>
 
                                     <Button onClick={calculateStateTax} className="w-full">

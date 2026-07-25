@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
+import { AiTransactionDraftInput } from '@/components/app/AiTransactionDraftInput';
 import { formatDateForDisplay, getTodayString, localDateToUTCString } from '@/lib/format_date';
 import { toast } from "sonner";
 import { PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
@@ -29,6 +30,18 @@ export default function ExpenseList() {
         description: '',
         accountId: ''
     });
+    const categoryOptions = categories.map((category) => ({
+        value: category.name,
+        label: category.name,
+    }));
+    const activeCategoryOptions = formData.category && !categoryOptions.some((option) => option.value === formData.category)
+        ? [{ value: formData.category, label: formData.category }, ...categoryOptions]
+        : categoryOptions;
+    const accountOptions = accounts.map((account) => ({
+        value: account.id.toString(),
+        label: `${account.name} ($${account.balance.toFixed(2)})`,
+        searchText: `${account.name} ${account.type}`,
+    }));
 
     const fetchExpenses = () => {
         fetch('/api/expenses')
@@ -114,6 +127,22 @@ export default function ExpenseList() {
         } else {
             toast.error("Failed to add expense");
         }
+    };
+
+    const applyExpenseDraft = (draft: {
+        amount: number;
+        category?: string;
+        date: string;
+        description: string;
+        accountId: number | null;
+    }) => {
+        setFormData({
+            amount: draft.amount.toString(),
+            category: draft.category || '',
+            date: draft.date,
+            description: draft.description,
+            accountId: draft.accountId ? draft.accountId.toString() : ''
+        });
     };
 
     const handleEditSubmit = async (e: React.FormEvent) => {
@@ -296,6 +325,7 @@ export default function ExpenseList() {
                             <DialogTitle>Add New Expense</DialogTitle>
                         </DialogHeader>
                         <form onSubmit={handleAddSubmit} className="space-y-4">
+                            <AiTransactionDraftInput type="expense" onApply={applyExpenseDraft} />
                             <div className="space-y-2">
                                 <Label htmlFor="description">Description</Label>
                                 <Input
@@ -320,18 +350,13 @@ export default function ExpenseList() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="category">Category</Label>
-                                <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select a category" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {categories.map((category) => (
-                                            <SelectItem key={category.id} value={category.name}>
-                                                {category.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.category}
+                                    onValueChange={(value) => setFormData({ ...formData, category: value })}
+                                    options={activeCategoryOptions}
+                                    placeholder="Select a category"
+                                    searchPlaceholder="Search categories..."
+                                />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="date">Date</Label>
@@ -345,18 +370,13 @@ export default function ExpenseList() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="account">Account (Optional)</Label>
-                                <Select value={formData.accountId} onValueChange={(value) => setFormData({ ...formData, accountId: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select an account" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {accounts.map((account) => (
-                                            <SelectItem key={account.id} value={account.id.toString()}>
-                                                {account.name} (${account.balance.toFixed(2)})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.accountId}
+                                    onValueChange={(value) => setFormData({ ...formData, accountId: value })}
+                                    options={accountOptions}
+                                    placeholder="Select an account"
+                                    searchPlaceholder="Search accounts..."
+                                />
                             </div>
                             <div className="flex justify-end space-x-2">
                                 <Button type="button" variant="outline" onClick={handleModalClose}>
@@ -398,18 +418,13 @@ export default function ExpenseList() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="edit-category">Category</Label>
-                                <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select a category" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {categories.map((category) => (
-                                            <SelectItem key={category.id} value={category.name}>
-                                                {category.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.category}
+                                    onValueChange={(value) => setFormData({ ...formData, category: value })}
+                                    options={activeCategoryOptions}
+                                    placeholder="Select a category"
+                                    searchPlaceholder="Search categories..."
+                                />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="edit-date">Date</Label>
@@ -423,18 +438,13 @@ export default function ExpenseList() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="edit-account">Account (Optional)</Label>
-                                <Select value={formData.accountId} onValueChange={(value) => setFormData({ ...formData, accountId: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select an account" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {accounts.map((account) => (
-                                            <SelectItem key={account.id} value={account.id.toString()}>
-                                                {account.name} (${account.balance.toFixed(2)})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.accountId}
+                                    onValueChange={(value) => setFormData({ ...formData, accountId: value })}
+                                    options={accountOptions}
+                                    placeholder="Select an account"
+                                    searchPlaceholder="Search accounts..."
+                                />
                             </div>
                             <div className="flex justify-end space-x-2">
                                 <Button type="button" variant="outline" onClick={handleModalClose}>

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
 export async function GET(
@@ -39,7 +40,7 @@ export async function PUT(
         }
 
         const newAmount = parseFloat(amount);
-        const expenseData: any = {
+        const expenseData: Prisma.ExpenseUncheckedUpdateInput = {
             amount: newAmount,
             category,
             date,

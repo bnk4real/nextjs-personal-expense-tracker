@@ -9,7 +9,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 function verifyToken(token: string) {
     try {
         return jwt.verify(token, JWT_SECRET) as { user_id: string; username: string; email: string; firstName: string; lastName: string };
-    } catch (error) {
+    } catch {
         return null;
     }
 }

@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { formatDateForDisplay } from '@/lib/format_date';
@@ -41,6 +41,7 @@ const debtTypes = [
     'Medical Debt',
     'Other'
 ];
+const debtTypeOptions = debtTypes.map((type) => ({ value: type, label: type }));
 
 export default function DebtTracker() {
     const [debts, setDebts] = useState<Debt[]>([]);
@@ -258,18 +259,13 @@ export default function DebtTracker() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="type">Debt Type</Label>
-                                    <Select value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})}>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select debt type" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {debtTypes.map((type) => (
-                                                <SelectItem key={type} value={type}>
-                                                    {type}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <SearchableSelect
+                                        value={formData.type}
+                                        onValueChange={(value) => setFormData({...formData, type: value})}
+                                        options={debtTypeOptions}
+                                        placeholder="Select debt type"
+                                        searchPlaceholder="Search debt types..."
+                                    />
                                 </div>
 
                                 <div className="space-y-2">
@@ -507,18 +503,13 @@ export default function DebtTracker() {
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="edit-type">Debt Type</Label>
-                                <Select value={formData.type} onValueChange={(value) => setFormData({...formData, type: value})}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select debt type" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {debtTypes.map((type) => (
-                                            <SelectItem key={type} value={type}>
-                                                {type}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.type}
+                                    onValueChange={(value) => setFormData({...formData, type: value})}
+                                    options={debtTypeOptions}
+                                    placeholder="Select debt type"
+                                    searchPlaceholder="Search debt types..."
+                                />
                             </div>
 
                             <div className="space-y-2">

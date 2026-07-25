@@ -21,6 +21,20 @@ export interface Account {
     creditLimit?: number;
 }
 
+export interface Transfer {
+    id: string;
+    amount: number;
+    date: string;
+    description: string;
+    fromAccountId?: number;
+    toAccountId?: number;
+    affectsBalance: boolean;
+    fromAccount?: Account | null;
+    toAccount?: Account | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
 export interface Subscription {
     id: string;
     user_id: string;

@@ -20,7 +20,9 @@ import {
     ChevronDown,
     ChevronRight,
     BarChart3,
-    Upload
+    Upload,
+    ArrowRightLeft,
+    List
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -53,6 +55,11 @@ const navigationItems: NavigationItem[] = [
         ],
     },
     {
+        href: '/transactions',
+        label: 'Transactions',
+        icon: <List className="w-5 h-5" />,
+    },
+    {
         href: '/earnings',
         label: 'Spending',
         icon: <TrendingUp className="w-5 h-5" />,
@@ -66,6 +73,11 @@ const navigationItems: NavigationItem[] = [
         href: '/accounts',
         label: 'Accounts',
         icon: <Wallet className="w-5 h-5" />,
+    },
+    {
+        href: '/transfers',
+        label: 'Transfers',
+        icon: <ArrowRightLeft className="w-5 h-5" />,
     },
     {
         href: '/imports',
@@ -150,7 +162,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     <button
                         onClick={() => toggleExpanded(item.label)}
                         className={cn(
-                            "w-full flex items-center justify-between px-3 py-2 rounded-lg text-lg font-medium transition-colors",
+                            "w-full flex items-center justify-between px-3 py-2 rounded-md text-sm font-medium transition-colors",
                             isActive
                                 ? "bg-primary text-primary-foreground"
                                 : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
@@ -181,7 +193,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     href={item.href!}
                     onClick={onClose}
                     className={cn(
-                        "flex items-center space-x-3 px-3 py-2 rounded-lg text-lg font-medium transition-colors",
+                        "flex items-center space-x-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
                         isActive
                             ? "bg-primary text-primary-foreground"
                             : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
@@ -231,8 +243,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     </div>
 
                     {/* Navigation */}
-                    <nav className="flex-1 px-4 py-6">
-                        <ul className="space-y-2">
+                    <nav className="flex-1 px-4 py-5">
+                        <ul className="space-y-1">
                             {navigationItems.map((item) => renderNavigationItem(item))}
                         </ul>
                     </nav>

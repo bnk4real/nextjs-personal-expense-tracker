@@ -1,43 +1,20 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon, Download, FileText } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import { cn } from '@/lib/utils';
+import { CalendarIcon, Download, FileText, Loader2, Search } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-
-// Extend jsPDF type to include autoTable
-declare module 'jspdf' {
-    interface jsPDF {
-        autoTable: (options: {
-            head: string[][];
-            body: (string | number)[][];
-            startY: number;
-            theme: string;
-            styles: {
-                fontSize: number;
-                cellPadding: number;
-            };
-            headStyles: {
-                fillColor: number[];
-                textColor: number;
-            };
-            alternateRowStyles: {
-                fillColor: number[];
-            };
-        }) => jsPDF;
-        lastAutoTable: {
-            finalY: number;
-        };
-    }
-}
+import { EmptyState, MetricTile, PageHeader } from '@/components/app/WorkspaceUI';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { SearchableSelect } from '@/components/ui/searchable-select';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface Transaction {
     id: string;
@@ -55,328 +32,299 @@ interface UserData {
     lastName: string;
 }
 
-// Function to get user data from cookies
-const getUserFromCookies = (): UserData | null => {
+const reportTypeOptions = [
+    { value: 'expenses', label: 'Expense Report' },
+    { value: 'incomes', label: 'Income Report' },
+];
+
+function startOfCurrentMonth() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+function getUserFromCookies(): UserData | null {
     if (typeof window === 'undefined') return null;
 
-    const getCookie = (name: string) => {
-        const value = `; ${document.cookie}`;
-        const parts = value.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop()?.split(';').shift();
-    };
+    const token = document.cookie
+        .split('; ')
+        .find((item) => item.startsWith('token='))
+        ?.split('=')[1];
 
-    const token = getCookie('token');
-    if (token) {
-        try {
-            const payload = JSON.parse(atob(token.split('.')[1]));
-            return {
-                username: payload.username,
-                email: payload.email,
-                firstName: payload.firstName,
-                lastName: payload.lastName,
-            };
-        } catch {
-            return null;
-        }
+    if (!token) return null;
+
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return {
+            username: payload.username,
+            email: payload.email,
+            firstName: payload.firstName,
+            lastName: payload.lastName,
+        };
+    } catch {
+        return null;
     }
-    return null;
-};
+}
+
+function money(value: number) {
+    return value.toLocaleString('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
 
 export default function ReportsPage() {
-    const [startDate, setStartDate] = useState<Date>();
-    const [endDate, setEndDate] = useState<Date>();
-    const [reportType, setReportType] = useState<string>('');
+    const [startDate, setStartDate] = useState<Date>(() => startOfCurrentMonth());
+    const [endDate, setEndDate] = useState<Date>(() => new Date());
+    const [reportType, setReportType] = useState<string>('expenses');
+    const [loadingPreview, setLoadingPreview] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [hasPreviewed, setHasPreviewed] = useState(false);
 
     const user = getUserFromCookies();
+    const reportTypeLabel = reportType === 'incomes' ? 'Income Report' : 'Expense Report';
+    const total = useMemo(
+        () => transactions.reduce((sum, transaction) => sum + transaction.amount, 0),
+        [transactions]
+    );
+    const average = transactions.length > 0 ? total / transactions.length : 0;
 
-    // Mock data - in real app, this would come from API
-    const mockTransactions: Transaction[] = useMemo(() => [
-        { id: '1', amount: 2500.00, description: 'Salary', date: '2024-01-15', category: 'Income', account: 'Checking' },
-        { id: '2', amount: -150.00, description: 'Groceries', date: '2024-01-16', category: 'Food', account: 'Credit Card' },
-        { id: '3', amount: -75.00, description: 'Gas', date: '2024-01-17', category: 'Transportation', account: 'Credit Card' },
-        { id: '4', amount: 500.00, description: 'Freelance Work', date: '2024-01-20', category: 'Income', account: 'Checking' },
-        { id: '5', amount: -200.00, description: 'Rent', date: '2024-01-01', category: 'Housing', account: 'Checking' },
-    ], []);
+    const fetchTransactions = useCallback(async () => {
+        if (!startDate || !endDate || !reportType) {
+            toast.error('Select a date range and report type first');
+            return [];
+        }
 
-    const fetchTransactions = useCallback(async (type: string, start: Date, end: Date) => {
+        setLoadingPreview(true);
         try {
             const response = await fetch(
-                `/api/reports?type=${type}&startDate=${start.toISOString().split('T')[0]}&endDate=${end.toISOString().split('T')[0]}`
+                `/api/reports?type=${reportType}&startDate=${startDate.toISOString().split('T')[0]}&endDate=${endDate.toISOString().split('T')[0]}`
             );
 
             if (!response.ok) {
-                throw new Error('Failed to fetch transactions');
+                const data = await response.json();
+                throw new Error(data.error || 'Failed to fetch report data');
             }
 
             const data = await response.json();
-            setTransactions(data.transactions);
-            return data.transactions;
-        } catch {
-            // Fallback to mock data
-            const filtered = mockTransactions.filter(transaction => {
-                const transactionDate = new Date(transaction.date);
-                const isInDateRange = transactionDate >= start && transactionDate <= end;
-
-                if (type === 'incomes') {
-                    return isInDateRange && transaction.amount > 0;
-                } else if (type === 'expenses') {
-                    return isInDateRange && transaction.amount < 0;
-                }
-
-                return isInDateRange;
-            });
-
-            setTransactions(filtered);
-            return filtered;
+            const rows = Array.isArray(data.transactions) ? data.transactions : [];
+            setTransactions(rows);
+            setHasPreviewed(true);
+            return rows as Transaction[];
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to fetch report data');
+            setTransactions([]);
+            setHasPreviewed(true);
+            return [];
+        } finally {
+            setLoadingPreview(false);
         }
-    }, [mockTransactions]);
+    }, [endDate, reportType, startDate]);
 
     const generatePDF = useCallback(async () => {
-        if (!startDate || !endDate || !reportType || !user) {
-            const missingFields = [];
-            if (!startDate) missingFields.push('start date');
-            if (!endDate) missingFields.push('end date');
-            if (!reportType) missingFields.push('report type');
-            if (!user) missingFields.push('user information');
-
-            alert(`Please fill in all required fields: ${missingFields.join(', ')}`);
+        if (!startDate || !endDate || !reportType) {
+            toast.error('Select a date range and report type first');
             return;
         }
 
         setIsGenerating(true);
 
         try {
-            const data = await fetchTransactions(reportType, startDate, endDate);
+            const rows = transactions.length > 0 || hasPreviewed ? transactions : await fetchTransactions();
 
-            if (!data || data.length === 0) {
-                alert('No transactions found for the selected period.');
-                setIsGenerating(false);
-                return;
-            }
-
-            // Validate data structure
-            const invalidTransactions = data.filter((t: Transaction) =>
-                !t.date || !t.description || typeof t.amount !== 'number'
-            );
-            if (invalidTransactions.length > 0) {
-                alert('Some transactions have invalid data. Please check the transaction records.');
-                setIsGenerating(false);
+            if (rows.length === 0) {
+                toast.error('No transactions found for this report');
                 return;
             }
 
             const doc = new jsPDF();
+            const owner = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'Expense Tracker User';
 
-            // Header
             doc.setFontSize(20);
             doc.text('Expense Tracker Report', 20, 30);
-
-            // Account Owner
             doc.setFontSize(12);
-            doc.text(`Account Owner: ${user.firstName} ${user.lastName}`, 20, 50);
-
-            // Report Date
+            doc.text(`Account Owner: ${owner}`, 20, 50);
             doc.text(`Report Date: ${format(new Date(), 'MMMM dd, yyyy')}`, 20, 60);
-
-            // Report Type
-            const reportTypeLabel = reportType === 'incomes' ? 'Income Report' : 'Expense Report';
             doc.text(`Report Type: ${reportTypeLabel}`, 20, 70);
-
-            // Date Range
             doc.text(`Period: ${format(startDate, 'MMM dd, yyyy')} - ${format(endDate, 'MMM dd, yyyy')}`, 20, 80);
 
-            // Transactions Table
-            const tableData = data.map((transaction: Transaction) => {
-                try {
-                    const formattedDate = format(new Date(transaction.date), 'MMM dd, yyyy');
-                    return [
-                        formattedDate,
-                        transaction.description,
-                        transaction.category || 'N/A',
-                        transaction.account || 'N/A',
-                        `$${Math.abs(transaction.amount).toFixed(2)}`
-                    ];
-                } catch {
-                    return [
-                        transaction.date, // fallback to original date string
-                        transaction.description,
-                        transaction.category || 'N/A',
-                        transaction.account || 'N/A',
-                        `$${Math.abs(transaction.amount).toFixed(2)}`
-                    ];
-                }
-            });
-
-            // Calculate totals
-            const total = data.reduce((sum: number, transaction: Transaction) => sum + transaction.amount, 0);
-
-            // Add table
-            if (typeof autoTable !== 'function') {
-                throw new Error('autoTable function not available. PDF generation library may not be properly loaded.');
-            }
-
             autoTable(doc, {
-                head: [['Date', 'Description', 'Category', 'Account', 'Amount']],
-                body: tableData,
+                head: [['Date', 'Description', 'Category/Source', 'Account', 'Amount']],
+                body: rows.map((transaction) => [
+                    format(new Date(`${transaction.date}T00:00:00`), 'MMM dd, yyyy'),
+                    transaction.description,
+                    transaction.category || 'N/A',
+                    transaction.account || 'N/A',
+                    money(Math.abs(transaction.amount)),
+                ]),
                 startY: 90,
                 theme: 'grid',
-                styles: {
-                    fontSize: 10,
-                    cellPadding: 3,
-                },
-                headStyles: {
-                    fillColor: [41, 128, 185],
-                    textColor: 255,
-                },
-                alternateRowStyles: {
-                    fillColor: [245, 245, 245],
-                },
+                styles: { fontSize: 9, cellPadding: 3 },
+                headStyles: { fillColor: [24, 24, 27], textColor: 255 },
+                alternateRowStyles: { fillColor: [245, 245, 245] },
             });
 
-            // Add total
-            const finalY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY
-                ? (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable!.finalY + 20
-                : 200;
-            doc.setFontSize(12);
+            const finalY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 90;
             doc.setFont('helvetica', 'bold');
-            doc.text(`Total ${reportTypeLabel}: $${Math.abs(total).toFixed(2)}`, 20, finalY);
+            doc.text(`Total ${reportTypeLabel}: ${money(Math.abs(total))}`, 20, finalY + 18);
 
-            // Footer
             const pageCount = doc.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                doc.setPage(i);
+            for (let page = 1; page <= pageCount; page += 1) {
+                doc.setPage(page);
                 doc.setFontSize(8);
                 doc.setFont('helvetica', 'normal');
-                doc.text('Expense Tracker', 20, doc.internal.pageSize.height - 20);
-                doc.text(`Generated on: ${format(new Date(), 'MMM dd, yyyy')}`, 20, doc.internal.pageSize.height - 15);
-                doc.text(`Page ${i} of ${pageCount}`, doc.internal.pageSize.width - 40, doc.internal.pageSize.height - 15);
+                doc.text('Expense Tracker', 20, doc.internal.pageSize.height - 18);
+                doc.text(`Generated on ${format(new Date(), 'MMM dd, yyyy')}`, 20, doc.internal.pageSize.height - 12);
+                doc.text(`Page ${page} of ${pageCount}`, doc.internal.pageSize.width - 40, doc.internal.pageSize.height - 12);
             }
 
-            // Save the PDF
             const fileName = `${reportTypeLabel.toLowerCase().replace(' ', '_')}_${format(startDate, 'yyyy-MM-dd')}_${format(endDate, 'yyyy-MM-dd')}.pdf`;
             doc.save(fileName);
-
-        } catch (_error) {
-            alert(`Error generating report: ${_error instanceof Error ? _error.message : 'Unknown error'}. Please try again.`);
+            toast.success('PDF report generated');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to generate PDF');
         } finally {
             setIsGenerating(false);
         }
-    }, [startDate, endDate, reportType, user, fetchTransactions]);
+    }, [endDate, fetchTransactions, hasPreviewed, reportType, reportTypeLabel, startDate, total, transactions, user]);
 
     return (
-        <div className="container mx-auto px-4 py-8">
-            <div className="max-w-4xl mx-auto">
-                <div className="mb-8">
-                    <h1 className="text-3xl font-bold text-gray-900 mb-2">Reports</h1>
-                    <p className="text-gray-600">Generate PDF reports for your financial transactions</p>
-                </div>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <FileText className="w-5 h-5" />
-                            Generate Report
-                        </CardTitle>
-                        <CardDescription>
-                            Select the date range and report type to generate a PDF report
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                        {/* Date Range Selection */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="start-date">Start Date</Label>
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                        <Button
-                                            variant="outline"
-                                            className={cn(
-                                                "w-full justify-start text-left font-normal",
-                                                !startDate && "text-muted-foreground"
-                                            )}
-                                        >
-                                            <CalendarIcon className="mr-2 h-4 w-4" />
-                                            {startDate ? format(startDate, "PPP") : "Pick a date"}
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
-                                        <Calendar
-                                            mode="single"
-                                            selected={startDate}
-                                            onSelect={setStartDate}
-                                            initialFocus
-                                        />
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label htmlFor="end-date">End Date</Label>
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                        <Button
-                                            variant="outline"
-                                            className={cn(
-                                                "w-full justify-start text-left font-normal",
-                                                !endDate && "text-muted-foreground"
-                                            )}
-                                        >
-                                            <CalendarIcon className="mr-2 h-4 w-4" />
-                                            {endDate ? format(endDate, "PPP") : "Pick a date"}
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
-                                        <Calendar
-                                            mode="single"
-                                            selected={endDate}
-                                            onSelect={setEndDate}
-                                            initialFocus
-                                        />
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-                        </div>
-
-                        {/* Report Type Selection */}
-                        <div className="space-y-2">
-                            <Label htmlFor="report-type">Report Type</Label>
-                            <Select value={reportType} onValueChange={setReportType}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select report type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="incomes">Income Report</SelectItem>
-                                    <SelectItem value="expenses">Expense Report</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        {/* Generate Button */}
-                        <Button
-                            onClick={generatePDF}
-                            disabled={!startDate || !endDate || !reportType || isGenerating}
-                            className="w-full"
-                        >
-                            <Download className="w-4 h-4 mr-2" />
-                            {isGenerating ? 'Generating...' : 'Generate PDF Report'}
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6">
+            <PageHeader
+                title="Reports"
+                description="Preview real transaction data, then export clean PDF reports."
+                actions={(
+                    <>
+                        <Button variant="outline" onClick={fetchTransactions} disabled={loadingPreview || isGenerating}>
+                            {loadingPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                            Preview
                         </Button>
+                        <Button onClick={generatePDF} disabled={loadingPreview || isGenerating}>
+                            {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                            Export PDF
+                        </Button>
+                    </>
+                )}
+            />
 
-                        {/* Preview Info */}
-                        {transactions.length > 0 && (
-                            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                                <h3 className="font-semibold mb-2">Report Preview</h3>
-                                <p className="text-sm text-gray-600">
-                                    Found {transactions.length} transaction{transactions.length !== 1 ? 's' : ''} for the selected period.
-                                </p>
-                                <p className="text-sm text-gray-600 mt-1">
-                                    Total: ${transactions.reduce((sum, t) => sum + t.amount, 0).toFixed(2)}
-                                </p>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
+            <Card className="rounded-md">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <FileText className="h-5 w-5" />
+                        Report Builder
+                    </CardTitle>
+                    <CardDescription>Pick a range and verify the rows before creating a file.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid gap-4 lg:grid-cols-3">
+                        <div className="space-y-2">
+                            <Label>Start date</Label>
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        className={cn('w-full justify-start text-left font-normal', !startDate && 'text-muted-foreground')}
+                                    >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {startDate ? format(startDate, 'PPP') : 'Pick a date'}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <Calendar mode="single" selected={startDate} onSelect={(date) => date && setStartDate(date)} />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>End date</Label>
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        className={cn('w-full justify-start text-left font-normal', !endDate && 'text-muted-foreground')}
+                                    >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {endDate ? format(endDate, 'PPP') : 'Pick a date'}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <Calendar mode="single" selected={endDate} onSelect={(date) => date && setEndDate(date)} />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Report type</Label>
+                            <SearchableSelect
+                                value={reportType}
+                                onValueChange={setReportType}
+                                options={reportTypeOptions}
+                                searchPlaceholder="Search report types..."
+                            />
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+                <MetricTile label="Rows" value={transactions.length.toString()} />
+                <MetricTile label="Total" value={money(Math.abs(total))} tone={reportType === 'incomes' ? 'income' : 'expense'} />
+                <MetricTile label="Average" value={money(Math.abs(average))} />
             </div>
+
+            <Card className="min-w-0 rounded-md">
+                <CardHeader>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                            <CardTitle>Preview Rows</CardTitle>
+                            <CardDescription>{reportTypeLabel} for {format(startDate, 'MMM d, yyyy')} to {format(endDate, 'MMM d, yyyy')}</CardDescription>
+                        </div>
+                        {hasPreviewed && <Badge variant="outline">{transactions.length} row{transactions.length === 1 ? '' : 's'}</Badge>}
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {transactions.length === 0 ? (
+                        <EmptyState
+                            title={hasPreviewed ? 'No transactions found' : 'No report preview yet'}
+                            description={hasPreviewed ? 'Try a wider date range or another report type.' : 'Run Preview to fetch report rows from the database.'}
+                        />
+                    ) : (
+                        <div className="overflow-x-auto rounded-md border">
+                            <table className="w-full min-w-[760px] table-fixed text-sm">
+                                <thead className="bg-muted/60">
+                                    <tr className="border-b">
+                                        <th className="w-28 px-3 py-3 text-left font-medium">Date</th>
+                                        <th className="px-3 py-3 text-left font-medium">Description</th>
+                                        <th className="w-40 px-3 py-3 text-left font-medium">Category/Source</th>
+                                        <th className="w-40 px-3 py-3 text-left font-medium">Account</th>
+                                        <th className="w-32 px-3 py-3 text-right font-medium">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {transactions.map((transaction) => (
+                                        <tr key={transaction.id} className="border-b last:border-0">
+                                            <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums">{transaction.date}</td>
+                                            <td className="px-3 py-3 align-top">
+                                                <p className="break-words font-medium">{transaction.description}</p>
+                                            </td>
+                                            <td className="px-3 py-3 align-top text-muted-foreground">{transaction.category || '-'}</td>
+                                            <td className="px-3 py-3 align-top text-muted-foreground">{transaction.account || '-'}</td>
+                                            <td className={cn(
+                                                'whitespace-nowrap px-3 py-3 text-right align-top font-semibold tabular-nums',
+                                                reportType === 'incomes' ? 'text-green-600' : 'text-red-600'
+                                            )}>
+                                                {money(Math.abs(transaction.amount))}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 }

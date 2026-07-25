@@ -7,7 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
+import { AiTransactionDraftInput } from '@/components/app/AiTransactionDraftInput';
 import { formatDateForDisplay, getTodayString } from '@/lib/format_date';
 import { Plus, Edit, Trash2, DollarSign } from 'lucide-react';
 import { toast } from "sonner";
@@ -60,6 +61,15 @@ export default function IncomesPage() {
         notes: '',
         accountId: ''
     });
+    const sourceOptions = incomeSources.map((source) => ({
+        value: source,
+        label: source,
+    }));
+    const accountOptions = accounts.map((account) => ({
+        value: account.id.toString(),
+        label: `${account.name} (${account.type}) - $${account.balance.toFixed(2)}`,
+        searchText: `${account.name} ${account.type}`,
+    }));
 
     const fetchIncomes = () => {
         fetch('/api/incomes')
@@ -145,6 +155,24 @@ export default function IncomesPage() {
         }
     };
 
+    const applyIncomeDraft = (draft: {
+        amount: number;
+        source?: string;
+        date: string;
+        description: string;
+        notes?: string;
+        accountId: number | null;
+    }) => {
+        setFormData({
+            amount: draft.amount.toString(),
+            source: draft.source || 'Other',
+            date: draft.date,
+            description: draft.description,
+            notes: draft.notes || '',
+            accountId: draft.accountId ? draft.accountId.toString() : ''
+        });
+    };
+
     const handleEditSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingIncome) return;
@@ -226,6 +254,7 @@ export default function IncomesPage() {
                             <DialogTitle>Add New Income</DialogTitle>
                         </DialogHeader>
                         <form onSubmit={handleAddSubmit} className="space-y-4">
+                            <AiTransactionDraftInput type="income" onApply={applyIncomeDraft} />
                             <div className="space-y-2">
                                 <Label htmlFor="amount">Amount ($)</Label>
                                 <Input
@@ -241,18 +270,13 @@ export default function IncomesPage() {
 
                             <div className="space-y-2">
                                 <Label htmlFor="source">Source</Label>
-                                <Select value={formData.source} onValueChange={(value) => setFormData({ ...formData, source: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select income source" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {incomeSources.map((source) => (
-                                            <SelectItem key={source} value={source}>
-                                                {source}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.source}
+                                    onValueChange={(value) => setFormData({ ...formData, source: value })}
+                                    options={sourceOptions}
+                                    placeholder="Select income source"
+                                    searchPlaceholder="Search sources..."
+                                />
                             </div>
 
                             <div className="space-y-2">
@@ -290,18 +314,13 @@ export default function IncomesPage() {
 
                             <div className="space-y-2">
                                 <Label htmlFor="account">Account (Optional)</Label>
-                                <Select value={formData.accountId} onValueChange={(value) => setFormData({ ...formData, accountId: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select account to deposit to" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {accounts.map((account) => (
-                                            <SelectItem key={account.id} value={account.id.toString()}>
-                                                {account.name} ({account.type}) - ${account.balance.toFixed(2)}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.accountId}
+                                    onValueChange={(value) => setFormData({ ...formData, accountId: value })}
+                                    options={accountOptions}
+                                    placeholder="Select account to deposit to"
+                                    searchPlaceholder="Search accounts..."
+                                />
                             </div>
 
                             <div className="flex justify-end space-x-2 pt-4">
@@ -422,18 +441,13 @@ export default function IncomesPage() {
 
                         <div className="space-y-2">
                             <Label htmlFor="edit-source">Source</Label>
-                            <Select value={formData.source} onValueChange={(value) => setFormData({ ...formData, source: value })}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select income source" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {incomeSources.map((source) => (
-                                        <SelectItem key={source} value={source}>
-                                            {source}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <SearchableSelect
+                                value={formData.source}
+                                onValueChange={(value) => setFormData({ ...formData, source: value })}
+                                options={sourceOptions}
+                                placeholder="Select income source"
+                                searchPlaceholder="Search sources..."
+                            />
                         </div>
 
                         <div className="space-y-2">
@@ -471,18 +485,13 @@ export default function IncomesPage() {
 
                         <div className="space-y-2">
                             <Label htmlFor="edit-account">Account (Optional)</Label>
-                            <Select value={formData.accountId} onValueChange={(value) => setFormData({ ...formData, accountId: value })}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select account to deposit to" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {accounts.map((account) => (
-                                        <SelectItem key={account.id} value={account.id.toString()}>
-                                            {account.name} ({account.type}) - ${account.balance.toFixed(2)}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <SearchableSelect
+                                value={formData.accountId}
+                                onValueChange={(value) => setFormData({ ...formData, accountId: value })}
+                                options={accountOptions}
+                                placeholder="Select account to deposit to"
+                                searchPlaceholder="Search accounts..."
+                            />
                         </div>
 
                         <div className="flex justify-end space-x-2 pt-4">

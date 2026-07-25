@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { formatDateForDisplay, getTodayString } from '@/lib/format_date';
 import { Plus, Edit, Trash2, DollarSign, Calculator, MapPin, Info } from 'lucide-react';
 import { toast } from "sonner";
@@ -129,6 +129,21 @@ const filingStatuses = [
     { value: 'head_of_household', label: 'Head of Household' }
 ];
 
+const NO_ACCOUNT = '__none__';
+const NO_STATE = '__none__';
+const sourceOptions = incomeSources.map((source) => ({
+    value: source,
+    label: source,
+}));
+const stateOptions = [
+    { value: NO_STATE, label: 'No state' },
+    ...usStates.map((state) => ({
+        value: state.code,
+        label: state.name,
+        searchText: `${state.name} ${state.code}`,
+    })),
+];
+
 export default function IncomeTracker() {
     const [incomes, setIncomes] = useState<Income[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
@@ -151,6 +166,14 @@ export default function IncomeTracker() {
         state: '',
         filingStatus: 'single'
     });
+    const accountOptions = [
+        { value: NO_ACCOUNT, label: 'No account' },
+        ...accounts.map((account) => ({
+            value: account.id.toString(),
+            label: `${account.name} (${account.type})`,
+            searchText: `${account.name} ${account.type}`,
+        })),
+    ];
 
     const fetchIncomes = () => {
         fetch('/api/incomes')
@@ -374,50 +397,34 @@ export default function IncomeTracker() {
 
                             <div className="space-y-2">
                                 <Label htmlFor="source">Source</Label>
-                                <Select value={formData.source} onValueChange={(value) => setFormData({ ...formData, source: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select source" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {incomeSources.map((source) => (
-                                            <SelectItem key={source} value={source}>
-                                                {source}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.source}
+                                    onValueChange={(value) => setFormData({ ...formData, source: value })}
+                                    options={sourceOptions}
+                                    placeholder="Select source"
+                                    searchPlaceholder="Search sources..."
+                                />
                             </div>
 
                             <div className="space-y-2">
                                 <Label htmlFor="state">State (for tax calculations)</Label>
-                                <Select value={formData.state} onValueChange={(value) => setFormData({ ...formData, state: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select state" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {usStates.map((state) => (
-                                            <SelectItem key={state.code} value={state.code}>
-                                                {state.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.state || NO_STATE}
+                                    onValueChange={(value) => setFormData({ ...formData, state: value === NO_STATE ? '' : value })}
+                                    options={stateOptions}
+                                    placeholder="Select state"
+                                    searchPlaceholder="Search states..."
+                                />
                             </div>
 
                             <div className="space-y-2">
                                 <Label htmlFor="filingStatus">Filing Status</Label>
-                                <Select value={formData.filingStatus} onValueChange={(value) => setFormData({ ...formData, filingStatus: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {filingStatuses.map((status) => (
-                                            <SelectItem key={status.value} value={status.value}>
-                                                {status.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.filingStatus}
+                                    onValueChange={(value) => setFormData({ ...formData, filingStatus: value })}
+                                    options={filingStatuses}
+                                    searchPlaceholder="Search filing statuses..."
+                                />
                             </div>
 
                             <div className="space-y-2">
@@ -444,18 +451,13 @@ export default function IncomeTracker() {
 
                             <div className="space-y-2">
                                 <Label htmlFor="account">Account (Optional)</Label>
-                                <Select value={formData.accountId} onValueChange={(value) => setFormData({ ...formData, accountId: value })}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select account" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {accounts.map((account) => (
-                                            <SelectItem key={account.id} value={account.id.toString()}>
-                                                {account.name} ({account.type})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SearchableSelect
+                                    value={formData.accountId || NO_ACCOUNT}
+                                    onValueChange={(value) => setFormData({ ...formData, accountId: value === NO_ACCOUNT ? '' : value })}
+                                    options={accountOptions}
+                                    placeholder="Select account"
+                                    searchPlaceholder="Search accounts..."
+                                />
                             </div>
 
                             <div className="space-y-2">
@@ -689,50 +691,34 @@ export default function IncomeTracker() {
 
                         <div className="space-y-2">
                             <Label htmlFor="edit-source">Source</Label>
-                            <Select value={formData.source} onValueChange={(value) => setFormData({ ...formData, source: value })}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select source" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {incomeSources.map((source) => (
-                                        <SelectItem key={source} value={source}>
-                                            {source}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <SearchableSelect
+                                value={formData.source}
+                                onValueChange={(value) => setFormData({ ...formData, source: value })}
+                                options={sourceOptions}
+                                placeholder="Select source"
+                                searchPlaceholder="Search sources..."
+                            />
                         </div>
 
                         <div className="space-y-2">
                             <Label htmlFor="edit-state">State (for tax calculations)</Label>
-                            <Select value={formData.state} onValueChange={(value) => setFormData({ ...formData, state: value })}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select state" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {usStates.map((state) => (
-                                        <SelectItem key={state.code} value={state.code}>
-                                            {state.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <SearchableSelect
+                                value={formData.state || NO_STATE}
+                                onValueChange={(value) => setFormData({ ...formData, state: value === NO_STATE ? '' : value })}
+                                options={stateOptions}
+                                placeholder="Select state"
+                                searchPlaceholder="Search states..."
+                            />
                         </div>
 
                         <div className="space-y-2">
                             <Label htmlFor="edit-filingStatus">Filing Status</Label>
-                            <Select value={formData.filingStatus} onValueChange={(value) => setFormData({ ...formData, filingStatus: value })}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {filingStatuses.map((status) => (
-                                        <SelectItem key={status.value} value={status.value}>
-                                            {status.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <SearchableSelect
+                                value={formData.filingStatus}
+                                onValueChange={(value) => setFormData({ ...formData, filingStatus: value })}
+                                options={filingStatuses}
+                                searchPlaceholder="Search filing statuses..."
+                            />
                         </div>
 
                         <div className="space-y-2">
@@ -759,18 +745,13 @@ export default function IncomeTracker() {
 
                         <div className="space-y-2">
                             <Label htmlFor="edit-account">Account (Optional)</Label>
-                            <Select value={formData.accountId} onValueChange={(value) => setFormData({ ...formData, accountId: value })}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select account" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {accounts.map((account) => (
-                                        <SelectItem key={account.id} value={account.id.toString()}>
-                                            {account.name} ({account.type})
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <SearchableSelect
+                                value={formData.accountId || NO_ACCOUNT}
+                                onValueChange={(value) => setFormData({ ...formData, accountId: value === NO_ACCOUNT ? '' : value })}
+                                options={accountOptions}
+                                placeholder="Select account"
+                                searchPlaceholder="Search accounts..."
+                            />
                         </div>
 
                         <div className="space-y-2">

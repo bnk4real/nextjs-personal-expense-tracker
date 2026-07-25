@@ -151,6 +151,15 @@ function amountKey(value: number) {
     return Math.abs(value).toFixed(2);
 }
 
+function amountKeyVariants(value: number) {
+    const amount = Math.abs(value);
+    return [
+        amount,
+        amount - 0.01,
+        amount + 0.01,
+    ].map((candidate) => candidate.toFixed(2));
+}
+
 function matchKey(type: 'expense' | 'income', date: string, amount: number, accountName: string) {
     return `${type}|${date}|${amountKey(amount)}|${accountName}`;
 }
@@ -173,12 +182,12 @@ async function findExistingMatches(transactions: ChaseTransaction[]) {
     const expenseAmounts = [...new Set(
         transactions
             .filter((transaction) => transaction.kind === 'expense')
-            .map((transaction) => transaction.displayAmount)
+            .flatMap((transaction) => amountKeyVariants(transaction.displayAmount).map(Number))
     )];
     const incomeAmounts = [...new Set(
         transactions
             .filter((transaction) => transaction.kind === 'income')
-            .map((transaction) => transaction.displayAmount)
+            .flatMap((transaction) => amountKeyVariants(transaction.displayAmount).map(Number))
     )];
     const accountFilter = accountIds.length > 0
         ? { OR: [{ accountId: { in: accountIds } }, { accountId: null }] }
@@ -222,8 +231,8 @@ async function findExistingMatches(transactions: ChaseTransaction[]) {
     ]);
 
     const matchesByKey = new Map<string, ExistingMatch[]>();
-    const pushMatch = (match: ExistingMatch) => {
-        const key = matchKey(match.type, match.date, match.amount, match.accountName || '');
+    const pushMatch = (match: ExistingMatch, keyAmount = match.amount) => {
+        const key = matchKey(match.type, match.date, keyAmount, match.accountName || '');
         const matches = matchesByKey.get(key) || [];
         matches.push(match);
         matchesByKey.set(key, matches);
@@ -232,28 +241,32 @@ async function findExistingMatches(transactions: ChaseTransaction[]) {
     for (const expense of existingExpenses) {
         const names = expense.accountId ? [accountNameById.get(expense.accountId)].filter(Boolean) : accountNames;
         for (const accountName of names) {
-            pushMatch({
-                id: expense.id,
-                type: 'expense',
-                date: expense.date,
-                amount: expense.amount,
-                description: expense.description,
-                accountName: expense.account?.name || accountName || null,
-            });
+            for (const amountVariant of amountKeyVariants(expense.amount)) {
+                pushMatch({
+                    id: expense.id,
+                    type: 'expense',
+                    date: expense.date,
+                    amount: expense.amount,
+                    description: expense.description,
+                    accountName: expense.account?.name || accountName || null,
+                }, Number(amountVariant));
+            }
         }
     }
 
     for (const income of existingIncomes) {
         const names = income.accountId ? [accountNameById.get(income.accountId)].filter(Boolean) : accountNames;
         for (const accountName of names) {
-            pushMatch({
-                id: income.id,
-                type: 'income',
-                date: income.date,
-                amount: income.amount,
-                description: income.description,
-                accountName: income.account?.name || accountName || null,
-            });
+            for (const amountVariant of amountKeyVariants(income.amount)) {
+                pushMatch({
+                    id: income.id,
+                    type: 'income',
+                    date: income.date,
+                    amount: income.amount,
+                    description: income.description,
+                    accountName: income.account?.name || accountName || null,
+                }, Number(amountVariant));
+            }
         }
     }
 
@@ -285,7 +298,7 @@ function buildPreviewRows(transactions: ChaseTransaction[], matchesByKey: Map<st
             fileName: transaction.fileName,
             isTransferLike: transaction.isTransferLike,
             duplicateStatus,
-            selectedByDefault: transaction.selectedByDefault && duplicateStatus === 'new',
+            selectedByDefault: transaction.selectedByDefault && !transaction.isTransferLike && duplicateStatus === 'new',
             existingMatches: matches.slice(0, 3),
         };
     });
@@ -363,11 +376,15 @@ export async function POST(request: NextRequest) {
         );
         const activeSelectedImportHashes = commit ? selectedImportHashes : defaultSelectedImportHashes;
         const transactionsToImport = uniqueTransactions.filter((transaction) =>
-            activeSelectedImportHashes?.has(transaction.importHash)
+            activeSelectedImportHashes?.has(transaction.importHash) && !transaction.isTransferLike
         );
 
         if (commit && (!selectedImportHashes || selectedImportHashes.size === 0)) {
             return NextResponse.json({ error: 'Select at least one row to import' }, { status: 400 });
+        }
+
+        if (commit && transactionsToImport.length === 0) {
+            return NextResponse.json({ error: 'Selected rows are transfers or review-only rows, so nothing can be imported.' }, { status: 400 });
         }
 
         const expenses: ExpenseImportRow[] = transactionsToImport

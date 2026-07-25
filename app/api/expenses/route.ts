@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
 export async function GET() {
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
         }
 
-        const expenseData: any = {
+        const expenseData: Prisma.ExpenseUncheckedCreateInput = {
             amount: parseFloat(amount),
             category,
             date,

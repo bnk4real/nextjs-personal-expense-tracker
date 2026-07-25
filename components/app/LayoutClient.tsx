@@ -60,7 +60,7 @@ export default function LayoutClient({ children }: LayoutClientProps) {
                 {shouldShowSidebar && (
                     <Nav onSidebarToggle={toggleSidebar} />
                 )}
-                <main className={shouldShowSidebar ? "lg:ml-64" : ""}>
+                <main className={shouldShowSidebar ? "min-w-0 overflow-x-hidden lg:ml-64" : "min-w-0 overflow-x-hidden"}>
                     {children}
                 </main>
             </div>

@@ -140,6 +140,15 @@ function amountKey(value: number) {
     return Math.abs(value).toFixed(2);
 }
 
+function amountKeyVariants(value: number) {
+    const amount = Math.abs(value);
+    return [
+        amount,
+        amount - 0.01,
+        amount + 0.01,
+    ].map((candidate) => candidate.toFixed(2));
+}
+
 function matchKey(type: 'expense' | 'income', date: string, amount: number) {
     return `${type}|${date}|${amountKey(amount)}`;
 }
@@ -150,12 +159,12 @@ async function findExistingMatches(transactions: BofaTransaction[], accountName:
     const expenseAmounts = [...new Set(
         transactions
             .filter((transaction) => transaction.kind === 'expense')
-            .map((transaction) => Math.abs(transaction.amount))
+            .flatMap((transaction) => amountKeyVariants(transaction.amount).map(Number))
     )];
     const incomeAmounts = [...new Set(
         transactions
             .filter((transaction) => transaction.kind === 'income')
-            .map((transaction) => transaction.amount)
+            .flatMap((transaction) => amountKeyVariants(transaction.amount).map(Number))
     )];
     const accountFilter = account
         ? { OR: [{ accountId: account.id }, { accountId: null }] }
@@ -199,31 +208,35 @@ async function findExistingMatches(transactions: BofaTransaction[], accountName:
     const matchesByKey = new Map<string, ExistingMatch[]>();
 
     for (const expense of existingExpenses) {
-        const key = matchKey('expense', expense.date, expense.amount);
-        const matches = matchesByKey.get(key) || [];
-        matches.push({
-            id: expense.id,
-            type: 'expense',
-            date: expense.date,
-            amount: expense.amount,
-            description: expense.description,
-            accountName: expense.account?.name || null,
-        });
-        matchesByKey.set(key, matches);
+        for (const amountVariant of amountKeyVariants(expense.amount)) {
+            const key = `expense|${expense.date}|${amountVariant}`;
+            const matches = matchesByKey.get(key) || [];
+            matches.push({
+                id: expense.id,
+                type: 'expense',
+                date: expense.date,
+                amount: expense.amount,
+                description: expense.description,
+                accountName: expense.account?.name || null,
+            });
+            matchesByKey.set(key, matches);
+        }
     }
 
     for (const income of existingIncomes) {
-        const key = matchKey('income', income.date, income.amount);
-        const matches = matchesByKey.get(key) || [];
-        matches.push({
-            id: income.id,
-            type: 'income',
-            date: income.date,
-            amount: income.amount,
-            description: income.description,
-            accountName: income.account?.name || null,
-        });
-        matchesByKey.set(key, matches);
+        for (const amountVariant of amountKeyVariants(income.amount)) {
+            const key = `income|${income.date}|${amountVariant}`;
+            const matches = matchesByKey.get(key) || [];
+            matches.push({
+                id: income.id,
+                type: 'income',
+                date: income.date,
+                amount: income.amount,
+                description: income.description,
+                accountName: income.account?.name || null,
+            });
+            matchesByKey.set(key, matches);
+        }
     }
 
     return matchesByKey;
@@ -254,7 +267,7 @@ function buildPreviewRows(transactions: BofaTransaction[], matchesByKey: Map<str
             fileName: transaction.fileName,
             isTransferLike: transaction.isTransferLike,
             duplicateStatus,
-            selectedByDefault: duplicateStatus === 'new',
+            selectedByDefault: duplicateStatus === 'new' && !transaction.isTransferLike,
             existingMatches: matches.slice(0, 3),
         };
     });
@@ -328,11 +341,15 @@ export async function POST(request: NextRequest) {
         );
         const activeSelectedImportHashes = commit ? selectedImportHashes : defaultSelectedImportHashes;
         const transactionsToImport = uniqueTransactions.filter((transaction) =>
-            activeSelectedImportHashes?.has(transaction.importHash)
+            activeSelectedImportHashes?.has(transaction.importHash) && !transaction.isTransferLike
         );
 
         if (commit && (!selectedImportHashes || selectedImportHashes.size === 0)) {
             return NextResponse.json({ error: 'Select at least one row to import' }, { status: 400 });
+        }
+
+        if (commit && transactionsToImport.length === 0) {
+            return NextResponse.json({ error: 'Selected rows are transfers, so nothing can be imported.' }, { status: 400 });
         }
 
         const expenses: ExpenseImportRow[] = transactionsToImport

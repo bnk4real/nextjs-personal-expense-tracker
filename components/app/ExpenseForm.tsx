@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Category } from '@/lib/types';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { toast } from "sonner";
 
 export default function ExpenseForm() {
@@ -21,6 +22,10 @@ export default function ExpenseForm() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!category) {
+            toast.error("Please select a category");
+            return;
+        }
         const response = await fetch('/api/expenses', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -55,17 +60,16 @@ export default function ExpenseForm() {
                 </div>
                 <div>
                     <label className="block text-sm font-medium mb-1">Category</label>
-                    <select
+                    <SearchableSelect
                         value={category}
-                        onChange={(e) => setCategory(e.target.value)}
-                        className="w-full p-2 border rounded"
-                        required
-                    >
-                        <option value="">Select Category</option>
-                        {categories.map((cat: Category) => (
-                            <option key={cat.id} value={cat.name}>{cat.name}</option>
-                        ))}
-                    </select>
+                        onValueChange={setCategory}
+                        options={categories.map((cat: Category) => ({
+                            value: cat.name,
+                            label: cat.name,
+                        }))}
+                        placeholder="Select Category"
+                        searchPlaceholder="Search categories..."
+                    />
                 </div>
                 <div>
                     <label className="block text-sm font-medium mb-1">Date</label>

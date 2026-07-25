@@ -44,6 +44,7 @@ model people {
   sessions      sessions[]
   subscriptions subscriptions[]
   categories    Category[]
+  chatSessions  ChatSession[]
 }
 
 model sessions {
@@ -138,6 +139,8 @@ model Account {
   creditLimit Float?
   expenses    Expense[]
   incomes     Income[]
+  transfersOut Transfer[] @relation("TransferFromAccount")
+  transfersIn  Transfer[] @relation("TransferToAccount")
 }
 
 model Income {
@@ -155,6 +158,24 @@ model Income {
   account      Account? @relation(fields: [accountId], references: [id])
 }
 
+model Transfer {
+  id            Int      @id @default(autoincrement())
+  amount        Float
+  date          String
+  description   String
+  fromAccountId Int?
+  toAccountId   Int?
+  affectsBalance Boolean @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  fromAccount   Account? @relation("TransferFromAccount", fields: [fromAccountId], references: [id])
+  toAccount     Account? @relation("TransferToAccount", fields: [toAccountId], references: [id])
+
+  @@index([date])
+  @@index([fromAccountId])
+  @@index([toAccountId])
+}
+
 model Debt {
   id             Int      @id @default(autoincrement())
   type           String
@@ -169,4 +190,29 @@ model Debt {
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model ChatSession {
+  id        String        @id @default(uuid()) @db.Uuid
+  user_id   String        @db.Uuid
+  title     String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  user      people        @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  messages  ChatMessage[]
+
+  @@index([user_id])
+  @@index([updatedAt])
+}
+
+model ChatMessage {
+  id        String      @id @default(uuid()) @db.Uuid
+  sessionId String      @db.Uuid
+  role      String
+  content   String
+  createdAt DateTime    @default(now())
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([createdAt])
 }
