@@ -45,7 +45,7 @@ export default function LayoutClient({ children }: LayoutClientProps) {
     if (isPublicRoute) {
         // Public routes (login/register) - no sidebar/nav
         return (
-            <div className="min-h-screen bg-gray-100">
+            <div className="min-h-screen bg-[#f4f6f8]">
                 {children}
             </div>
         );
@@ -56,11 +56,11 @@ export default function LayoutClient({ children }: LayoutClientProps) {
             {shouldShowSidebar && (
                 <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
             )}
-            <div className="min-h-screen bg-gray-100">
+            <div className={shouldShowSidebar ? "min-h-screen bg-[#f4f6f8] lg:pl-64" : "min-h-screen bg-[#f4f6f8]"}>
                 {shouldShowSidebar && (
                     <Nav onSidebarToggle={toggleSidebar} />
                 )}
-                <main className={shouldShowSidebar ? "min-w-0 overflow-x-hidden lg:ml-64" : "min-w-0 overflow-x-hidden"}>
+                <main className="min-w-0 overflow-x-hidden">
                     {children}
                 </main>
             </div>

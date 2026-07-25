@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { prisma } from '@/lib/prisma';
+import { summarizeBudget } from '@/lib/budget';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -39,6 +40,47 @@ type DateRange = {
     start?: string;
     end?: string;
 };
+
+const DATE_REFERENCE_PATTERN = new RegExp([
+    'all time',
+    'ทั้งหมด',
+    'ทุกเดือน',
+    'all transactions',
+    '20\\d{2}-(?:0?[1-9]|1[0-2])',
+    '(?:0?[1-9]|1[0-2])/20\\d{2}',
+    'last month',
+    'เดือนที่แล้ว',
+    'this month',
+    'current month',
+    'ทั้งเดือน',
+    'เดือนนี้',
+    'รายเดือน',
+    'monthly',
+    'january',
+    'february',
+    'march',
+    'april',
+    'may',
+    'june',
+    'july',
+    'august',
+    'september',
+    'october',
+    'november',
+    'december',
+    'มกราคม',
+    'กุมภาพันธ์',
+    'มีนาคม',
+    'เมษายน',
+    'พฤษภาคม',
+    'มิถุนายน',
+    'กรกฎาคม',
+    'สิงหาคม',
+    'กันยายน',
+    'ตุลาคม',
+    'พฤศจิกายน',
+    'ธันวาคม',
+].join('|'), 'i');
 
 function verifyToken(token: string) {
     try {
@@ -131,6 +173,23 @@ function detectDateRange(message: string): DateRange {
     return monthBounds(now.getFullYear(), now.getMonth());
 }
 
+function contextMessageForDateRange(
+    latestMessage: string,
+    conversationMessages: Array<{ role: string; content: string }>
+) {
+    if (DATE_REFERENCE_PATTERN.test(latestMessage)) return latestMessage;
+
+    const previousDateMessage = conversationMessages.find((chatMessage) => (
+        chatMessage.role === 'user'
+        && chatMessage.content.trim() !== latestMessage.trim()
+        && DATE_REFERENCE_PATTERN.test(chatMessage.content)
+    ));
+
+    return previousDateMessage
+        ? `${latestMessage}\nPrevious date context: ${previousDateMessage.content}`
+        : latestMessage;
+}
+
 function groupRows(rows: TransactionRow[]): MoneyGroup[] {
     const groups = new Map<string, MoneyGroup>();
 
@@ -203,7 +262,7 @@ async function getUserFinancialContext(userId: string, message: string) {
     const range = detectDateRange(message);
     const where = dateWhere(range);
 
-    const [expenses, incomes, transfers, accounts, categories, subscriptions] = await Promise.all([
+    const [expenses, incomes, transfers, accounts, categories, subscriptions, monthlyBudgets] = await Promise.all([
         prisma.expense.findMany({
             where: where ? { date: where } : undefined,
             include: { account: true },
@@ -229,6 +288,12 @@ async function getUserFinancialContext(userId: string, message: string) {
             orderBy: { next_payment_date: 'asc' },
             take: 50,
         }),
+        prisma.monthlyBudget.findMany({
+            where: { userId },
+            include: { categoryLimits: true },
+            orderBy: { month: 'desc' },
+            take: 24,
+        }),
     ]);
 
     const expenseRows: TransactionRow[] = expenses.map((expense) => ({
@@ -251,6 +316,17 @@ async function getUserFinancialContext(userId: string, message: string) {
     const totalExpenses = expenseRows.reduce((sum, row) => sum + row.amount, 0);
     const totalIncomes = incomeRows.reduce((sum, row) => sum + row.amount, 0);
     const totalTransfers = transfers.reduce((sum, transfer) => sum + transfer.amount, 0);
+    const requestedMonth = range.start?.slice(0, 7) || null;
+    const monthlyBudget = requestedMonth
+        ? monthlyBudgets.find((budget) => budget.month === requestedMonth) || null
+        : null;
+    const monthlyBudgetSummary = monthlyBudget
+        ? summarizeBudget(monthlyBudget, expenses)
+        : null;
+    const allocatedCents = monthlyBudget?.categoryLimits.reduce(
+        (total, limit) => total + limit.amountCents,
+        0
+    ) || 0;
 
     return {
         range,
@@ -302,6 +378,38 @@ async function getUserFinancialContext(userId: string, message: string) {
             nextPayment: subscription.next_payment_date,
             status: subscription.status,
         })),
+        budget: monthlyBudget && monthlyBudgetSummary ? {
+            month: monthlyBudget.month,
+            goal: monthlyBudget.amountCents / 100,
+            warningThreshold: monthlyBudget.warningThreshold,
+            spent: monthlyBudgetSummary.spentCents / 100,
+            remaining: monthlyBudgetSummary.remainingCents / 100,
+            percentUsed: monthlyBudgetSummary.percentUsed,
+            status: monthlyBudgetSummary.status,
+            allocated: allocatedCents / 100,
+            unallocated: (monthlyBudget.amountCents - allocatedCents) / 100,
+            allocations: monthlyBudget.categoryLimits.map((limit) => {
+                const actual = monthlyBudgetSummary.categoryBreakdown.find(
+                    (category) => category.category === limit.category
+                );
+                return {
+                    category: limit.category,
+                    goal: limit.amountCents / 100,
+                    spent: (actual?.spentCents || 0) / 100,
+                    remaining: (limit.amountCents - (actual?.spentCents || 0)) / 100,
+                    percentUsed: actual?.percentUsed || 0,
+                    status: actual?.status || 'on-track',
+                };
+            }),
+        } : null,
+        budgetHistory: monthlyBudgets.map((budget) => ({
+            month: budget.month,
+            goal: budget.amountCents / 100,
+            allocated: budget.categoryLimits.reduce(
+                (total, limit) => total + limit.amountCents,
+                0
+            ) / 100,
+        })),
     };
 }
 
@@ -317,6 +425,48 @@ function formatDetailRows(rows: TransactionRow[]) {
     return rows
         .map((row) => `- ${row.date} | ${money(row.amount)} | ${row.bucket} | ${row.description} | ${row.account}`)
         .join('\n');
+}
+
+function formatBudgetContext(context: Awaited<ReturnType<typeof getUserFinancialContext>>) {
+    if (!context.budget) {
+        const history = context.budgetHistory.length > 0
+            ? context.budgetHistory
+                .map((budget) => `- ${budget.month}: goal ${money(budget.goal)}, allocated ${money(budget.allocated)}`)
+                .join('\n')
+            : '- none';
+
+        return `No monthly budget is set for ${context.range.label}.
+Do not invent a budget goal for this range.
+
+Available budget history:
+${history}`;
+    }
+
+    const budget = context.budget;
+    const remainingLabel = budget.remaining >= 0
+        ? `Remaining: ${money(budget.remaining)}`
+        : `Over budget by: ${money(Math.abs(budget.remaining))}`;
+    const allocations = budget.allocations.length > 0
+        ? budget.allocations.map((allocation) => {
+            const allocationRemaining = allocation.remaining >= 0
+                ? `${money(allocation.remaining)} remaining`
+                : `${money(Math.abs(allocation.remaining))} over`;
+            return `- ${allocation.category}: goal ${money(allocation.goal)}, spent ${money(allocation.spent)}, ${allocationRemaining}, ${allocation.percentUsed.toFixed(1)}% used`;
+        }).join('\n')
+        : '- none; the full budget is flexible';
+
+    return `Monthly budget for ${budget.month}:
+- Budget goal: ${money(budget.goal)}
+- Actual expenses: ${money(budget.spent)}
+- ${remainingLabel}
+- Used: ${budget.percentUsed.toFixed(1)}%
+- Status: ${budget.status}
+- Warning threshold: ${budget.warningThreshold}%
+- Allocated to categories: ${money(budget.allocated)}
+- Flexible/unallocated: ${money(budget.unallocated)}
+
+Category allocations:
+${allocations}`;
 }
 
 function buildSystemPrompt(context: Awaited<ReturnType<typeof getUserFinancialContext>>) {
@@ -337,6 +487,11 @@ Persona and language:
 Data rules:
 - Use only the financial data provided below.
 - Expenses, incomes, and transfers are separate. Transfers are not income and not expense.
+- A budget goal is the planned MonthlyBudget amount. It is not income, account balance, credit limit, or past spending.
+- When asked for the budget goal, state the exact goal first, then spent and remaining if useful.
+- "Remaining budget" means budget goal minus actual expenses. "Unallocated" means the portion not assigned to a category; these are different values.
+- Category allocations are parts of the monthly budget and must not be added on top of the monthly budget goal.
+- If no budget exists for the requested month, say clearly that no budget is set. Never infer one from expenses or income.
 - Do not claim you can only see 10 transactions. The provided aggregate groups are computed from the full query result.
 - If detail rows are truncated, explain that the aggregates are complete but the raw row list is shortened for context size.
 - When asked to break down a month, prefer grouped totals first, then notable merchants/categories.
@@ -351,6 +506,9 @@ Summary:
 - Net cashflow: ${money(context.summary.netCashflow)}
 - Transfer movement: ${money(context.summary.totalTransfers)} (${context.summary.transferCount} transfers)
 - Account balances total: ${money(context.summary.accountsTotal)}
+
+Budget:
+${formatBudgetContext(context)}
 
 Expense breakdown by category (complete for this data range):
 ${formatGroups(context.expenseGroups.byCategory)}
@@ -392,20 +550,33 @@ function titleFromMessage(message: string) {
     return cleaned.length > 60 ? `${cleaned.slice(0, 57)}...` : cleaned || 'New chat';
 }
 
+function cleanGeneratedTitle(value: string, fallback: string) {
+    const cleaned = value
+        .split('\n')[0]
+        .replace(/^(title|session title|ชื่อแชต|ชื่อเรื่อง)\s*:\s*/i, '')
+        .replace(/^[#*`"'“”‘’\s]+|[#*`"'“”‘’\s]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!cleaned) return titleFromMessage(fallback);
+    return cleaned.length > 60 ? `${cleaned.slice(0, 57).trim()}...` : cleaned;
+}
+
 async function findOrCreateSession(userId: string, sessionId: string | null, message: string) {
     if (sessionId) {
         const existing = await prisma.chatSession.findFirst({
             where: { id: sessionId, user_id: userId },
         });
-        if (existing) return existing;
+        if (existing) return { session: existing, isNew: false };
     }
 
-    return prisma.chatSession.create({
+    const session = await prisma.chatSession.create({
         data: {
             user_id: userId,
             title: titleFromMessage(message),
         },
     });
+    return { session, isNew: true };
 }
 
 export async function GET(request: NextRequest) {
@@ -482,7 +653,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Message is required' }, { status: 400 });
         }
 
-        const session = await findOrCreateSession(decoded.user_id, sessionId || null, message);
+        const { session, isNew } = await findOrCreateSession(decoded.user_id, sessionId || null, message);
         await prisma.chatMessage.create({
             data: {
                 sessionId: session.id,
@@ -491,14 +662,13 @@ export async function POST(request: NextRequest) {
             },
         });
 
-        const [financialContext, conversationMessages] = await Promise.all([
-            getUserFinancialContext(decoded.user_id, message),
-            prisma.chatMessage.findMany({
-                where: { sessionId: session.id },
-                orderBy: { createdAt: 'desc' },
-                take: 24,
-            }),
-        ]);
+        const conversationMessages = await prisma.chatMessage.findMany({
+            where: { sessionId: session.id },
+            orderBy: { createdAt: 'desc' },
+            take: 24,
+        });
+        const contextMessage = contextMessageForDateRange(message, conversationMessages);
+        const financialContext = await getUserFinancialContext(decoded.user_id, contextMessage);
 
         const systemPrompt = buildSystemPrompt(financialContext);
         const conversationContext = conversationMessages
@@ -515,7 +685,23 @@ Answer the latest user message now.`;
 
         const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-        const result = await model.generateContent(prompt);
+        const titlePromise = isNew
+            ? model.generateContent(`Create a concise session title for the user's first message below.
+Rules:
+- Use the same language as the message.
+- Summarize the main intent, not the exact full sentence.
+- Use 3 to 7 words when the language naturally uses spaces.
+- Do not answer the question.
+- Return only the title with no quotes, markdown, label, or ending punctuation.
+
+User message:
+${message.trim()}`).then((titleResult) => cleanGeneratedTitle(titleResult.response.text(), message))
+                .catch(() => titleFromMessage(message))
+            : Promise.resolve(session.title);
+        const [result, sessionTitle] = await Promise.all([
+            model.generateContent(prompt),
+            titlePromise,
+        ]);
         const aiResponse = normalizeMaleThaiTone(result.response.text());
 
         await prisma.chatMessage.create({
@@ -527,13 +713,16 @@ Answer the latest user message now.`;
         });
         await prisma.chatSession.update({
             where: { id: session.id },
-            data: { updatedAt: new Date() },
+            data: {
+                updatedAt: new Date(),
+                ...(isNew ? { title: sessionTitle } : {}),
+            },
         });
 
         return NextResponse.json({
             response: aiResponse,
             sessionId: session.id,
-            sessionTitle: session.title,
+            sessionTitle,
             dataRange: financialContext.range,
             counts: {
                 expenses: financialContext.summary.expenseCount,

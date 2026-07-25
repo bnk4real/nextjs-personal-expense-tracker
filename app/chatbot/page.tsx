@@ -1,13 +1,30 @@
 'use client';
 
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, MessageSquare, Plus, Send, User } from 'lucide-react';
+import { Bot, MessageSquare, MoreHorizontal, Pencil, Plus, Send, Trash2, User } from 'lucide-react';
+import { toast } from 'sonner';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/app/WorkspaceUI';
 import { cn } from '@/lib/utils';
 
@@ -171,7 +188,13 @@ export default function ChatbotPage() {
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [loadingSessions, setLoadingSessions] = useState(true);
-    const scrollAreaRef = useRef<HTMLDivElement>(null);
+    const [renameSession, setRenameSession] = useState<ChatSession | null>(null);
+    const [deleteSession, setDeleteSession] = useState<ChatSession | null>(null);
+    const [renameTitle, setRenameTitle] = useState('');
+    const [renaming, setRenaming] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const instantScrollRef = useRef(false);
 
     const activeSession = useMemo(
         () => sessions.find((session) => session.id === activeSessionId) || null,
@@ -196,6 +219,7 @@ export default function ChatbotPage() {
             if (!response.ok) return;
             const data = await response.json();
             const sessionMessages = Array.isArray(data.session?.messages) ? data.session.messages : [];
+            instantScrollRef.current = true;
             setActiveSessionId(sessionId);
             setMessages(sessionMessages.length > 0 ? sessionMessages : [welcomeMessage]);
         } finally {
@@ -208,12 +232,19 @@ export default function ChatbotPage() {
     }, []);
 
     useEffect(() => {
-        if (scrollAreaRef.current) {
-            scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-        }
+        const frame = window.requestAnimationFrame(() => {
+            messagesEndRef.current?.scrollIntoView({
+                behavior: instantScrollRef.current ? 'auto' : 'smooth',
+                block: 'end',
+            });
+            instantScrollRef.current = false;
+        });
+
+        return () => window.cancelAnimationFrame(frame);
     }, [messages, isLoading]);
 
     const startNewSession = () => {
+        instantScrollRef.current = true;
         setActiveSessionId(null);
         setMessages([welcomeMessage]);
         setInput('');
@@ -257,6 +288,13 @@ export default function ChatbotPage() {
 
             setActiveSessionId(data.sessionId);
             setMessages((current) => [...current, assistantMessage]);
+            if (data.sessionTitle) {
+                setSessions((current) => current.map((session) => (
+                    session.id === data.sessionId
+                        ? { ...session, title: data.sessionTitle, updatedAt: new Date().toISOString() }
+                        : session
+                )));
+            }
             await loadSessions();
         } catch {
             const errorMessage: Message = {
@@ -275,6 +313,61 @@ export default function ChatbotPage() {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             handleSendMessage();
+        }
+    };
+
+    const openRenameDialog = (session: ChatSession) => {
+        setRenameSession(session);
+        setRenameTitle(session.title);
+    };
+
+    const handleRenameSession = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!renameSession || !renameTitle.trim()) return;
+
+        setRenaming(true);
+        try {
+            const response = await fetch(`/api/chatbot/sessions/${renameSession.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: renameTitle.trim() }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed to rename session');
+
+            setSessions((current) => current.map((session) => (
+                session.id === renameSession.id ? { ...session, title: data.session.title } : session
+            )));
+            setRenameSession(null);
+            toast.success('Session renamed');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to rename session');
+        } finally {
+            setRenaming(false);
+        }
+    };
+
+    const handleDeleteSession = async () => {
+        if (!deleteSession) return;
+
+        setDeleting(true);
+        try {
+            const response = await fetch(`/api/chatbot/sessions/${deleteSession.id}`, {
+                method: 'DELETE',
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed to delete session');
+
+            setSessions((current) => current.filter((session) => session.id !== deleteSession.id));
+            if (activeSessionId === deleteSession.id) {
+                startNewSession();
+            }
+            setDeleteSession(null);
+            toast.success('Session deleted');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to delete session');
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -308,18 +401,44 @@ export default function ChatbotPage() {
                                     <p className="px-2 py-3 text-sm text-muted-foreground">No saved sessions yet</p>
                                 ) : (
                                     sessions.map((session) => (
-                                        <button
+                                        <div
                                             key={session.id}
-                                            type="button"
-                                            onClick={() => loadSession(session.id)}
                                             className={cn(
-                                                'w-full rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-muted',
+                                                'group flex items-start rounded-md border transition-colors hover:bg-muted',
                                                 activeSessionId === session.id && 'border-primary bg-primary/5'
                                             )}
                                         >
-                                            <span className="line-clamp-2 font-medium">{session.title}</span>
-                                            <span className="mt-1 block text-xs text-muted-foreground">{displayDate(session.updatedAt)}</span>
-                                        </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => loadSession(session.id)}
+                                                className="min-w-0 flex-1 px-3 py-2 text-left text-sm"
+                                            >
+                                                <span className="line-clamp-2 font-medium">{session.title}</span>
+                                                <span className="mt-1 block text-xs text-muted-foreground">{displayDate(session.updatedAt)}</span>
+                                            </button>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon-sm"
+                                                        className="mr-1 mt-1 shrink-0 opacity-70 hover:opacity-100"
+                                                        aria-label={`Session actions for ${session.title}`}
+                                                    >
+                                                        <MoreHorizontal />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onSelect={() => openRenameDialog(session)}>
+                                                        <Pencil />
+                                                        Rename
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem variant="destructive" onSelect={() => setDeleteSession(session)}>
+                                                        <Trash2 />
+                                                        Delete
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
                                     ))
                                 )}
                             </div>
@@ -338,7 +457,7 @@ export default function ChatbotPage() {
                         </div>
                     </CardHeader>
                     <CardContent className="flex h-full min-h-0 flex-col p-0">
-                        <ScrollArea className="min-h-0 flex-1 p-4" ref={scrollAreaRef}>
+                        <ScrollArea className="min-h-0 flex-1 p-4">
                             <div className="space-y-4">
                                 {messages.map((message) => (
                                     <div
@@ -391,6 +510,7 @@ export default function ChatbotPage() {
                                         </div>
                                     </div>
                                 )}
+                                <div ref={messagesEndRef} className="h-px" aria-hidden="true" />
                             </div>
                         </ScrollArea>
 
@@ -417,6 +537,55 @@ export default function ChatbotPage() {
                     </CardContent>
                 </Card>
             </div>
+
+            <Dialog open={Boolean(renameSession)} onOpenChange={(open) => !open && setRenameSession(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <form onSubmit={handleRenameSession} className="space-y-4">
+                        <DialogHeader>
+                            <DialogTitle>Rename Session</DialogTitle>
+                            <DialogDescription>Use a short name that makes this conversation easy to find.</DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-2">
+                            <Label htmlFor="session-name">Session Name</Label>
+                            <Input
+                                id="session-name"
+                                value={renameTitle}
+                                onChange={(event) => setRenameTitle(event.target.value)}
+                                maxLength={80}
+                                autoFocus
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setRenameSession(null)} disabled={renaming}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" disabled={renaming || !renameTitle.trim()}>
+                                {renaming ? 'Saving...' : 'Save Name'}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={Boolean(deleteSession)} onOpenChange={(open) => !open && setDeleteSession(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Delete Session?</DialogTitle>
+                        <DialogDescription>
+                            “{deleteSession?.title}” and every message in it will be permanently deleted.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setDeleteSession(null)} disabled={deleting}>
+                            Cancel
+                        </Button>
+                        <Button variant="destructive" onClick={handleDeleteSession} disabled={deleting}>
+                            <Trash2 />
+                            {deleting ? 'Deleting...' : 'Delete Session'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

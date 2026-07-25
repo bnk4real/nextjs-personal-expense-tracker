@@ -2,22 +2,38 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CalendarDays } from 'lucide-react';
+import {
+    ArrowRight,
+    ArrowRightLeft,
+    CalendarDays,
+    Clock3,
+    Landmark,
+    ListFilter,
+    TrendingDown,
+    TrendingUp,
+    WalletCards,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Account, Category, Expense, Subscription, Transfer } from '@/lib/types';
 import Calendar from '@/lib/Calendar';
 import { doesDateStringMatchUTC, formatDateForDisplay, parseUTCDate } from '@/lib/format_date';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import {
     AccountBadge,
     AmountText,
     EmptyState,
-    MetricTile,
-    PageHeader,
     TransactionTypeBadge,
 } from '@/components/app/WorkspaceUI';
-import { AddTransactionButton } from '@/components/app/TransactionFormDialog';
+import { TransactionFormDialog } from '@/components/app/TransactionFormDialog';
 
 type IncomeRow = {
     id: number;
@@ -40,6 +56,18 @@ type DashboardTransaction = {
     accountLabel: string;
 };
 
+type CategoryPressure = {
+    category: string;
+    amount: number;
+    count: number;
+};
+
+type HomeDetailItem =
+    | { kind: 'transaction'; transaction: DashboardTransaction }
+    | { kind: 'category'; category: CategoryPressure }
+    | { kind: 'account'; account: Account }
+    | { kind: 'subscription'; subscription: Subscription };
+
 function money(value: number) {
     return value.toLocaleString('en-US', {
         style: 'currency',
@@ -49,10 +77,20 @@ function money(value: number) {
     });
 }
 
-function currentMonthMatch(date: string) {
+function monthLabel(date: Date) {
+    return date.toLocaleDateString('en-US', {
+        month: 'long',
+        year: 'numeric',
+    });
+}
+
+function dateKey(date: string) {
+    return parseUTCDate(date).toISOString().slice(0, 10);
+}
+
+function currentMonthMatch(date: string, referenceDate: Date) {
     const parsed = parseUTCDate(date);
-    const now = new Date();
-    return parsed.getMonth() === now.getMonth() && parsed.getFullYear() === now.getFullYear();
+    return parsed.getMonth() === referenceDate.getMonth() && parsed.getFullYear() === referenceDate.getFullYear();
 }
 
 function normalizeDashboardTransactions(
@@ -97,6 +135,66 @@ function normalizeDashboardTransactions(
     });
 }
 
+function SummaryStat({
+    label,
+    value,
+    tone = 'neutral',
+}: {
+    label: string;
+    value: string;
+    tone?: 'neutral' | 'expense' | 'income' | 'transfer';
+}) {
+    const toneClass = {
+        neutral: 'text-zinc-950',
+        expense: 'text-red-600',
+        income: 'text-emerald-600',
+        transfer: 'text-sky-600',
+    }[tone];
+
+    return (
+        <div className="min-w-0 border-l px-4 first:border-l-0 first:pl-0 max-sm:border-l-0 max-sm:border-t max-sm:px-0 max-sm:pt-3 max-sm:first:border-t-0 max-sm:first:pt-0">
+            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">{label}</p>
+            <p className={cn('mt-1 truncate text-xl font-semibold tabular-nums', toneClass)}>{value}</p>
+        </div>
+    );
+}
+
+function Panel({
+    title,
+    icon,
+    children,
+}: {
+    title: string;
+    icon: React.ReactNode;
+    children: React.ReactNode;
+}) {
+    return (
+        <section className="rounded-md border bg-white/85 shadow-xs">
+            <div className="flex items-center gap-2 border-b px-4 py-3">
+                {icon}
+                <h2 className="text-sm font-semibold">{title}</h2>
+            </div>
+            <div className="p-4">{children}</div>
+        </section>
+    );
+}
+
+function detailDialogTitle(item: HomeDetailItem | null) {
+    if (!item) return '';
+    if (item.kind === 'transaction') return 'Transaction Detail';
+    if (item.kind === 'category') return 'Category Detail';
+    if (item.kind === 'account') return 'Account Detail';
+    return 'Upcoming Payment Detail';
+}
+
+function detailDialogDescription(item: HomeDetailItem | null) {
+    if (!item) return '';
+    if (item.kind === 'transaction') return 'Review this ledger row.';
+    if (item.kind === 'category') return 'Review this month category summary.';
+    if (item.kind === 'account') return 'Review this account snapshot.';
+    return 'Review this scheduled payment.';
+}
+
 export default function Dashboard() {
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [incomes, setIncomes] = useState<IncomeRow[]>([]);
@@ -105,7 +203,10 @@ export default function Dashboard() {
     const [categories, setCategories] = useState<Category[]>([]);
     const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
     const [selectedDate, setSelectedDate] = useState<Date | undefined>();
+    const [selectedItem, setSelectedItem] = useState<HomeDetailItem | null>(null);
     const [loading, setLoading] = useState(true);
+
+    const today = useMemo(() => new Date(), []);
 
     const refreshDashboardData = () => {
         Promise.all([
@@ -126,7 +227,7 @@ export default function Dashboard() {
                 setLoading(false);
             })
             .catch(() => {
-                toast.error('Failed to load dashboard');
+                toast.error('Failed to load month workspace');
                 setLoading(false);
             });
     };
@@ -140,6 +241,68 @@ export default function Dashboard() {
         [expenses, incomes, transfers]
     );
 
+    const monthTransactions = useMemo(
+        () => transactions.filter((transaction) => currentMonthMatch(transaction.date, today)),
+        [today, transactions]
+    );
+
+    const monthExpenseRows = useMemo(
+        () => expenses.filter((expense) => currentMonthMatch(expense.date, today)),
+        [expenses, today]
+    );
+
+    const currentMonthExpenses = monthExpenseRows.reduce((total, expense) => total + expense.amount, 0);
+    const currentMonthIncome = incomes
+        .filter((income) => currentMonthMatch(income.date, today))
+        .reduce((total, income) => total + income.amount, 0);
+    const currentMonthTransfers = transfers
+        .filter((transfer) => currentMonthMatch(transfer.date, today))
+        .reduce((total, transfer) => total + transfer.amount, 0);
+    const netCashflow = currentMonthIncome - currentMonthExpenses;
+    const totalAssets = accounts.reduce((sum, account) => sum + account.balance, 0);
+    const averageDailySpend = currentMonthExpenses / Math.max(today.getDate(), 1);
+
+    const categoryPressure = useMemo(() => {
+        const groups = new Map<string, CategoryPressure>();
+
+        monthExpenseRows.forEach((expense) => {
+            const existing = groups.get(expense.category) || {
+                category: expense.category || 'Other',
+                amount: 0,
+                count: 0,
+            };
+            existing.amount += expense.amount;
+            existing.count += 1;
+            groups.set(existing.category, existing);
+        });
+
+        return [...groups.values()].sort((a, b) => b.amount - a.amount).slice(0, 6);
+    }, [monthExpenseRows]);
+
+    const maxCategoryAmount = Math.max(...categoryPressure.map((category) => category.amount), 1);
+
+    const groupedMonthTransactions = useMemo(() => {
+        const groups = new Map<string, DashboardTransaction[]>();
+
+        monthTransactions.forEach((transaction) => {
+            const key = dateKey(transaction.date);
+            groups.set(key, [...(groups.get(key) || []), transaction]);
+        });
+
+        return [...groups.entries()]
+            .sort(([a], [b]) => b.localeCompare(a))
+            .map(([key, rows]) => ({
+                key,
+                label: formatDateForDisplay(key),
+                total: rows.reduce((sum, row) => {
+                    if (row.type === 'expense') return sum - row.amount;
+                    if (row.type === 'income') return sum + row.amount;
+                    return sum;
+                }, 0),
+                rows,
+            }));
+    }, [monthTransactions]);
+
     const expenseDates = expenses
         .map((expense) => parseUTCDate(expense.date))
         .filter((date) => !Number.isNaN(date.getTime()));
@@ -148,16 +311,6 @@ export default function Dashboard() {
         .map((subscription) => parseUTCDate(subscription.next_payment_date!))
         .filter((date) => !Number.isNaN(date.getTime()));
 
-    const currentMonthExpenses = expenses
-        .filter((expense) => currentMonthMatch(expense.date))
-        .reduce((total, expense) => total + expense.amount, 0);
-    const currentMonthIncome = incomes
-        .filter((income) => currentMonthMatch(income.date))
-        .reduce((total, income) => total + income.amount, 0);
-    const netCashflow = currentMonthIncome - currentMonthExpenses;
-    const totalAssets = accounts.reduce((sum, account) => sum + account.balance, 0);
-
-    const recentTransactions = transactions.slice(0, 8);
     const selectedDateTransactions = selectedDate
         ? transactions.filter((transaction) => doesDateStringMatchUTC(transaction.date, selectedDate))
         : [];
@@ -172,164 +325,457 @@ export default function Dashboard() {
         .filter((subscription) => {
             if (!subscription.next_payment_date) return false;
             const paymentDate = parseUTCDate(subscription.next_payment_date);
-            const today = new Date();
             const thirtyDaysFromNow = new Date();
             thirtyDaysFromNow.setDate(today.getDate() + 30);
             return paymentDate >= today && paymentDate <= thirtyDaysFromNow;
         })
         .sort((a, b) => parseUTCDate(a.next_payment_date!).getTime() - parseUTCDate(b.next_payment_date!).getTime())
+        .slice(0, 4);
+
+    const visibleAccounts = accounts
+        .slice()
+        .sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance))
         .slice(0, 5);
 
-    if (loading) return <div className="p-6">Loading...</div>;
+    if (loading) {
+        return (
+            <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-7xl items-center justify-center p-6">
+                <div className="rounded-md border bg-white px-4 py-3 text-sm text-muted-foreground shadow-xs">Loading month workspace...</div>
+            </div>
+        );
+    }
 
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-5 px-4 py-5 sm:px-6 lg:px-8">
-            <PageHeader
-                title="Dashboard"
-                description="A compact command center for cashflow, quick entry, and recent activity."
-                actions={(
-                    <>
-                        <AddTransactionButton type="expense" accounts={accounts} categories={categories} onSaved={refreshDashboardData} />
-                        <AddTransactionButton type="income" accounts={accounts} categories={categories} onSaved={refreshDashboardData} />
-                        <AddTransactionButton type="transfer" accounts={accounts} categories={categories} onSaved={refreshDashboardData} />
-                    </>
-                )}
-            />
+        <div className="mx-auto w-full max-w-[1440px] space-y-5 px-4 py-5 sm:px-6 lg:px-8">
+            <section className="rounded-md border bg-white shadow-xs">
+                <div className="grid gap-5 p-5 xl:grid-cols-[minmax(0,1fr)_auto]">
+                    <div className="min-w-0">
+                        <Badge variant="outline" className="mb-3 border-zinc-300 bg-zinc-50 text-zinc-700">
+                            Month Workspace
+                        </Badge>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                                <h1 className="text-3xl font-semibold tracking-normal text-zinc-950">{monthLabel(today)}</h1>
+                                <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                                    Review the month as one ledger: expenses, income, transfers, subscriptions, and account movement.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <MetricTile label="This Month Spend" value={money(currentMonthExpenses)} tone="expense" />
-                <MetricTile label="This Month Income" value={money(currentMonthIncome)} tone="income" />
-                <MetricTile label="Net Cashflow" value={money(netCashflow)} tone={netCashflow >= 0 ? 'income' : 'expense'} />
-                <MetricTile label="Current Assets" value={money(totalAssets)} tone="neutral" />
-            </div>
+                    <div className="grid gap-3 sm:grid-cols-4 xl:w-[720px]">
+                        <SummaryStat label="Spend" value={money(currentMonthExpenses)} tone="expense" />
+                        <SummaryStat label="Income" value={money(currentMonthIncome)} tone="income" />
+                        <SummaryStat label="Net" value={money(netCashflow)} tone={netCashflow >= 0 ? 'income' : 'expense'} />
+                        <SummaryStat label="Assets" value={money(totalAssets)} />
+                    </div>
+                </div>
 
-            <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(300px,340px)]">
-                <Card className="min-w-0 rounded-md">
-                    <CardHeader className="flex flex-row items-center justify-between gap-4">
-                        <CardTitle>Recent Transactions</CardTitle>
+                <div className="flex flex-col gap-3 border-t bg-zinc-50/70 px-5 py-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                        <TransactionFormDialog
+                            type="expense"
+                            accounts={accounts}
+                            categories={categories}
+                            onSaved={refreshDashboardData}
+                            trigger={(
+                                <Button size="sm">
+                                    <TrendingDown className="h-4 w-4" />
+                                    Expense
+                                </Button>
+                            )}
+                        />
+                        <TransactionFormDialog
+                            type="income"
+                            accounts={accounts}
+                            categories={categories}
+                            onSaved={refreshDashboardData}
+                            trigger={(
+                                <Button size="sm" variant="outline">
+                                    <TrendingUp className="h-4 w-4" />
+                                    Income
+                                </Button>
+                            )}
+                        />
+                        <TransactionFormDialog
+                            type="transfer"
+                            accounts={accounts}
+                            categories={categories}
+                            onSaved={refreshDashboardData}
+                            trigger={(
+                                <Button size="sm" variant="outline">
+                                    <ArrowRightLeft className="h-4 w-4" />
+                                    Transfer
+                                </Button>
+                            )}
+                        />
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Clock3 className="h-4 w-4" />
+                        <span>{monthTransactions.length} rows this month · {money(averageDailySpend)} daily spend avg · {money(currentMonthTransfers)} transfers</span>
+                    </div>
+                </div>
+            </section>
+
+            <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <section className="min-w-0 rounded-md border bg-white shadow-xs">
+                    <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h2 className="flex items-center gap-2 text-base font-semibold">
+                                <ListFilter className="h-4 w-4" />
+                                Monthly Ledger
+                            </h2>
+                            <p className="mt-1 text-sm text-muted-foreground">Grouped by posting date so the month reads like a real statement.</p>
+                        </div>
                         <Button variant="outline" size="sm" asChild>
-                            <Link href="/transactions" className="gap-2">
-                                View All
+                            <Link href="/transactions">
+                                Open Ledger
                                 <ArrowRight className="h-4 w-4" />
                             </Link>
                         </Button>
-                    </CardHeader>
-                    <CardContent>
-                        {recentTransactions.length === 0 ? (
-                            <EmptyState title="No transactions yet" description="Use quick actions to add your first transaction." />
-                        ) : (
-                            <div className="rounded-md border">
-                                <table className="w-full table-fixed text-sm">
-                                    <thead className="border-b bg-muted/50 text-left">
-                                        <tr>
-                                            <th className="w-24 px-3 py-2 font-medium">Date</th>
-                                            <th className="w-24 px-3 py-2 font-medium">Type</th>
-                                            <th className="px-3 py-2 font-medium">Description</th>
-                                            <th className="hidden w-44 px-3 py-2 font-medium lg:table-cell">Account</th>
-                                            <th className="w-28 px-3 py-2 text-right font-medium">Amount</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {recentTransactions.map((transaction) => (
-                                            <tr key={transaction.uid} className="border-b last:border-b-0 hover:bg-muted/30">
-                                                <td className="whitespace-nowrap px-3 py-2">{formatDateForDisplay(transaction.date)}</td>
-                                                <td className="px-3 py-2"><TransactionTypeBadge type={transaction.type} /></td>
-                                                <td className="min-w-0 px-3 py-2">
-                                                    <p className="truncate font-medium">{transaction.description}</p>
-                                                    <p className="truncate text-xs text-muted-foreground">
-                                                        {transaction.detail}
-                                                        <span className="lg:hidden"> · {transaction.accountLabel}</span>
-                                                    </p>
-                                                </td>
-                                                <td className="hidden px-3 py-2 lg:table-cell"><AccountBadge>{transaction.accountLabel}</AccountBadge></td>
-                                                <td className="px-3 py-2 text-right"><AmountText amount={transaction.amount} type={transaction.type} /></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
+                    </div>
 
-                <Card className="min-w-0 rounded-md">
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <CalendarDays className="h-5 w-5" />
-                            Activity Calendar
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <Calendar
-                            onSelect={(date) => setSelectedDate(date)}
-                            modifiers={{ hasExpense: expenseDates, hasSubscription: subscriptionDates }}
-                        />
-                        <div className="rounded-md border p-3">
-                            <p className="text-sm font-medium">
-                                {selectedDate ? formatDateForDisplay(selectedDate.toISOString()) : 'Select a date'}
-                            </p>
-                            {selectedDate ? (
-                                <div className="mt-3 space-y-3">
-                                    {selectedDateTransactions.length === 0 && selectedDateSubscriptions.length === 0 ? (
-                                        <p className="text-sm text-muted-foreground">No activity on this date.</p>
-                                    ) : (
-                                        <>
-                                            {selectedDateTransactions.map((transaction) => (
-                                                <div key={transaction.uid} className="flex items-start justify-between gap-3 text-sm">
-                                                    <div>
-                                                        <div className="flex items-center gap-2">
-                                                            <TransactionTypeBadge type={transaction.type} />
-                                                            <span className="font-medium">{transaction.description}</span>
-                                                        </div>
-                                                        <p className="mt-1 text-xs text-muted-foreground">{transaction.accountLabel}</p>
-                                                    </div>
-                                                    <AmountText amount={transaction.amount} type={transaction.type} />
-                                                </div>
-                                            ))}
-                                            {selectedDateSubscriptions.map((subscription) => (
-                                                <div key={subscription.id} className="flex items-start justify-between gap-3 text-sm">
-                                                    <div>
-                                                        <p className="font-medium">{subscription.name}</p>
-                                                        <p className="text-xs text-muted-foreground">{subscription.provider || 'Subscription'}</p>
-                                                    </div>
-                                                    <span className="font-semibold text-blue-600">{money(subscription.price_cents / 100)}</span>
-                                                </div>
-                                            ))}
-                                        </>
-                                    )}
-                                </div>
-                            ) : (
-                                <p className="mt-2 text-sm text-muted-foreground">Expense and subscription dates are marked on the calendar.</p>
-                            )}
+                    {groupedMonthTransactions.length === 0 ? (
+                        <div className="p-4">
+                            <EmptyState title="No rows in this month" description="Add a transaction or import a statement to start the ledger." />
                         </div>
-                    </CardContent>
-                </Card>
-            </div>
-
-            <Card className="rounded-md">
-                <CardHeader>
-                    <CardTitle>Upcoming Payments</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    {upcomingPayments.length === 0 ? (
-                        <EmptyState title="No upcoming payments" description="Nothing due in the next 30 days." />
                     ) : (
-                        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                            {upcomingPayments.map((subscription) => (
-                                <div key={subscription.id} className="flex items-center justify-between rounded-md border p-3">
-                                    <div>
-                                        <p className="font-medium">{subscription.name}</p>
-                                        <p className="text-sm text-muted-foreground">
-                                            {subscription.next_payment_date ? formatDateForDisplay(subscription.next_payment_date) : 'No date'}
+                        <div className="overflow-hidden">
+                            <div className="hidden border-b bg-zinc-50/80 px-4 py-2 text-xs font-medium uppercase tracking-normal text-muted-foreground md:grid md:grid-cols-[140px_96px_minmax(0,1fr)_minmax(140px,180px)_120px] md:gap-3">
+                                <span>Date</span>
+                                <span>Type</span>
+                                <span>Description</span>
+                                <span>Account</span>
+                                <span className="text-right">Amount</span>
+                            </div>
+                            {groupedMonthTransactions.map((group) => (
+                                <div key={group.key} className="grid gap-0 border-b last:border-b-0 md:grid-cols-[140px_minmax(0,1fr)]">
+                                    <div className="border-b bg-zinc-50/70 px-4 py-3 md:border-b-0 md:border-r">
+                                        <p className="text-sm font-semibold text-zinc-950">{group.label}</p>
+                                        <p className={cn(
+                                            'mt-1 text-xs font-semibold tabular-nums',
+                                            group.total >= 0 ? 'text-emerald-600' : 'text-red-600'
+                                        )}>
+                                            {money(group.total)}
                                         </p>
                                     </div>
-                                    <span className="font-semibold text-red-600">{money(subscription.price_cents / 100)}</span>
+                                    <div className="min-w-0 divide-y">
+                                        {group.rows.map((transaction) => (
+                                            <button
+                                                key={transaction.uid}
+                                                type="button"
+                                                onClick={() => setSelectedItem({ kind: 'transaction', transaction })}
+                                                className="grid w-full min-w-0 gap-2 px-4 py-3 text-left transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[96px_minmax(0,1fr)] md:grid-cols-[96px_minmax(0,1fr)_minmax(140px,180px)_120px] md:gap-3 md:items-center"
+                                            >
+                                                <div className="min-w-0">
+                                                    <TransactionTypeBadge type={transaction.type} />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="truncate font-medium">{transaction.description}</p>
+                                                    <p className="truncate text-xs text-muted-foreground">{transaction.detail}</p>
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <AccountBadge>{transaction.accountLabel}</AccountBadge>
+                                                </div>
+                                                <div className="justify-self-start md:justify-self-end md:text-right">
+                                                    <AmountText amount={transaction.amount} type={transaction.type} />
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             ))}
                         </div>
                     )}
-                </CardContent>
-            </Card>
+                </section>
+
+                <aside className="space-y-5">
+                    <Panel title="Category Pressure" icon={<TrendingDown className="h-4 w-4 text-red-600" />}>
+                        {categoryPressure.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No spending categories in this month yet.</p>
+                        ) : (
+                            <div className="space-y-4">
+                                {categoryPressure.map((category) => (
+                                    <button
+                                        key={category.category}
+                                        type="button"
+                                        onClick={() => setSelectedItem({ kind: 'category', category })}
+                                        className="w-full space-y-2 rounded-md p-2 text-left transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    >
+                                        <div className="flex items-center justify-between gap-3 text-sm">
+                                            <span className="truncate font-medium">{category.category}</span>
+                                            <span className="shrink-0 tabular-nums text-muted-foreground">{money(category.amount)}</span>
+                                        </div>
+                                        <div className="h-2 rounded-full bg-zinc-100">
+                                            <div
+                                                className="h-2 rounded-full bg-red-500"
+                                                style={{ width: `${Math.max((category.amount / maxCategoryAmount) * 100, 4)}%` }}
+                                            />
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">{category.count} transaction{category.count === 1 ? '' : 's'}</p>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </Panel>
+
+                    <Panel title="Accounts Snapshot" icon={<WalletCards className="h-4 w-4 text-emerald-600" />}>
+                        {visibleAccounts.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No accounts connected yet.</p>
+                        ) : (
+                            <div className="space-y-3">
+                                {visibleAccounts.map((account) => {
+                                    const isCredit = account.type === 'Credit Card';
+                                    return (
+                                        <button
+                                            key={account.id}
+                                            type="button"
+                                            onClick={() => setSelectedItem({ kind: 'account', account })}
+                                            className="flex w-full items-center justify-between gap-3 rounded-md p-2 text-left text-sm transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        >
+                                            <div className="min-w-0">
+                                                <p className="truncate font-medium">{account.name}</p>
+                                                <p className="text-xs text-muted-foreground">{account.type}</p>
+                                            </div>
+                                            <span className={cn(
+                                                'shrink-0 font-semibold tabular-nums',
+                                                isCredit && account.balance > 0 ? 'text-red-600' : 'text-emerald-600'
+                                            )}>
+                                                {money(account.balance)}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                                <Button variant="outline" size="sm" className="w-full" asChild>
+                                    <Link href="/accounts">
+                                        Audit Accounts
+                                        <ArrowRight className="h-4 w-4" />
+                                    </Link>
+                                </Button>
+                            </div>
+                        )}
+                    </Panel>
+
+                    <Panel title="Upcoming" icon={<Landmark className="h-4 w-4 text-sky-600" />}>
+                        {upcomingPayments.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">Nothing due in the next 30 days.</p>
+                        ) : (
+                            <div className="space-y-3">
+                                {upcomingPayments.map((subscription) => (
+                                    <button
+                                        key={subscription.id}
+                                        type="button"
+                                        onClick={() => setSelectedItem({ kind: 'subscription', subscription })}
+                                        className="flex w-full items-center justify-between gap-3 rounded-md p-2 text-left text-sm transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    >
+                                        <div className="min-w-0">
+                                            <p className="truncate font-medium">{subscription.name}</p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {subscription.next_payment_date ? formatDateForDisplay(subscription.next_payment_date) : 'No date'}
+                                            </p>
+                                        </div>
+                                        <span className="shrink-0 font-semibold tabular-nums text-red-600">{money(subscription.price_cents / 100)}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </Panel>
+
+                    <Panel title="Day Inspector" icon={<CalendarDays className="h-4 w-4 text-zinc-700" />}>
+                        <div className="space-y-4">
+                            <Calendar
+                                onSelect={(date) => setSelectedDate(date)}
+                                modifiers={{ hasExpense: expenseDates, hasSubscription: subscriptionDates }}
+                            />
+                            <div className="border-t pt-3">
+                                <p className="text-sm font-medium">
+                                    {selectedDate ? formatDateForDisplay(selectedDate.toISOString()) : 'Select a date'}
+                                </p>
+                                {selectedDate ? (
+                                    <div className="mt-3 space-y-3">
+                                        {selectedDateTransactions.length === 0 && selectedDateSubscriptions.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground">No activity on this date.</p>
+                                        ) : (
+                                            <>
+                                                {selectedDateTransactions.map((transaction) => (
+                                                    <button
+                                                        key={transaction.uid}
+                                                        type="button"
+                                                        onClick={() => setSelectedItem({ kind: 'transaction', transaction })}
+                                                        className="flex w-full items-start justify-between gap-3 rounded-md p-2 text-left text-sm transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                    >
+                                                        <div className="min-w-0">
+                                                            <p className="truncate font-medium">{transaction.description}</p>
+                                                            <p className="text-xs text-muted-foreground">{transaction.accountLabel}</p>
+                                                        </div>
+                                                        <AmountText amount={transaction.amount} type={transaction.type} />
+                                                    </button>
+                                                ))}
+                                                {selectedDateSubscriptions.map((subscription) => (
+                                                    <button
+                                                        key={subscription.id}
+                                                        type="button"
+                                                        onClick={() => setSelectedItem({ kind: 'subscription', subscription })}
+                                                        className="flex w-full items-start justify-between gap-3 rounded-md p-2 text-left text-sm transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                    >
+                                                        <div className="min-w-0">
+                                                            <p className="truncate font-medium">{subscription.name}</p>
+                                                            <p className="text-xs text-muted-foreground">{subscription.provider || 'Subscription'}</p>
+                                                        </div>
+                                                        <span className="font-semibold text-sky-600">{money(subscription.price_cents / 100)}</span>
+                                                    </button>
+                                                ))}
+                                            </>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <p className="mt-2 text-sm text-muted-foreground">Calendar marks expense and subscription dates.</p>
+                                )}
+                            </div>
+                        </div>
+                    </Panel>
+                </aside>
+            </div>
+
+            <Dialog
+                open={Boolean(selectedItem)}
+                onOpenChange={(open) => {
+                    if (!open) setSelectedItem(null);
+                }}
+            >
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>{detailDialogTitle(selectedItem)}</DialogTitle>
+                        <DialogDescription>
+                            {detailDialogDescription(selectedItem)}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {selectedItem?.kind === 'transaction' && (
+                        <div className="space-y-5">
+                            <div className="rounded-md border bg-zinc-50 p-4">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="min-w-0">
+                                        <TransactionTypeBadge type={selectedItem.transaction.type} />
+                                        <h3 className="mt-3 break-words text-xl font-semibold text-zinc-950">
+                                            {selectedItem.transaction.description}
+                                        </h3>
+                                        <p className="mt-1 text-sm text-muted-foreground">
+                                            {formatDateForDisplay(selectedItem.transaction.date)}
+                                        </p>
+                                    </div>
+                                    <div className="shrink-0 sm:text-right">
+                                        <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Amount</p>
+                                        <p className="mt-1 text-2xl font-semibold">
+                                            <AmountText amount={selectedItem.transaction.amount} type={selectedItem.transaction.type} />
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="grid gap-3 text-sm sm:grid-cols-2">
+                                <div className="rounded-md border p-3">
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                                        {selectedItem.transaction.type === 'income' ? 'Source' : selectedItem.transaction.type === 'expense' ? 'Category' : 'Status'}
+                                    </p>
+                                    <p className="mt-1 font-medium">{selectedItem.transaction.detail}</p>
+                                </div>
+                                <div className="rounded-md border p-3">
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Account</p>
+                                    <p className="mt-1 break-words font-medium">{selectedItem.transaction.accountLabel}</p>
+                                </div>
+                            </div>
+
+                        </div>
+                    )}
+                    {selectedItem?.kind === 'category' && (
+                        <div className="space-y-5">
+                            <div className="rounded-md border bg-zinc-50 p-4">
+                                <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Category</p>
+                                <h3 className="mt-2 break-words text-xl font-semibold text-zinc-950">{selectedItem.category.category}</h3>
+                            </div>
+                            <div className="grid gap-3 text-sm sm:grid-cols-2">
+                                <div className="rounded-md border p-3">
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Month Spend</p>
+                                    <p className="mt-1 text-lg font-semibold tabular-nums text-red-600">{money(selectedItem.category.amount)}</p>
+                                </div>
+                                <div className="rounded-md border p-3">
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Transactions</p>
+                                    <p className="mt-1 text-lg font-semibold tabular-nums">{selectedItem.category.count}</p>
+                                </div>
+                            </div>
+                            <Button variant="outline" asChild>
+                                <Link href="/transactions">
+                                    Open Ledger
+                                    <ArrowRight className="h-4 w-4" />
+                                </Link>
+                            </Button>
+                        </div>
+                    )}
+                    {selectedItem?.kind === 'account' && (
+                        <div className="space-y-5">
+                            <div className="rounded-md border bg-zinc-50 p-4">
+                                <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Account</p>
+                                <h3 className="mt-2 break-words text-xl font-semibold text-zinc-950">{selectedItem.account.name}</h3>
+                                <p className="mt-1 text-sm text-muted-foreground">{selectedItem.account.type}</p>
+                            </div>
+                            <div className="grid gap-3 text-sm sm:grid-cols-2">
+                                <div className="rounded-md border p-3">
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Balance</p>
+                                    <p className={cn(
+                                        'mt-1 text-lg font-semibold tabular-nums',
+                                        selectedItem.account.type === 'Credit Card' && selectedItem.account.balance > 0 ? 'text-red-600' : 'text-emerald-600'
+                                    )}>
+                                        {money(selectedItem.account.balance)}
+                                    </p>
+                                </div>
+                                <div className="rounded-md border p-3">
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Credit Limit</p>
+                                    <p className="mt-1 text-lg font-semibold tabular-nums">
+                                        {selectedItem.account.creditLimit ? money(selectedItem.account.creditLimit) : 'Not credit-backed'}
+                                    </p>
+                                </div>
+                            </div>
+                            <Button variant="outline" asChild>
+                                <Link href="/accounts">
+                                    Open Accounts
+                                    <ArrowRight className="h-4 w-4" />
+                                </Link>
+                            </Button>
+                        </div>
+                    )}
+                    {selectedItem?.kind === 'subscription' && (
+                        <div className="space-y-5">
+                            <div className="rounded-md border bg-zinc-50 p-4">
+                                <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Upcoming Payment</p>
+                                <h3 className="mt-2 break-words text-xl font-semibold text-zinc-950">{selectedItem.subscription.name}</h3>
+                                <p className="mt-1 text-sm text-muted-foreground">{selectedItem.subscription.provider || 'Subscription'}</p>
+                            </div>
+                            <div className="grid gap-3 text-sm sm:grid-cols-2">
+                                <div className="rounded-md border p-3">
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Amount</p>
+                                    <p className="mt-1 text-lg font-semibold tabular-nums text-red-600">{money(selectedItem.subscription.price_cents / 100)}</p>
+                                </div>
+                                <div className="rounded-md border p-3">
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Next Payment</p>
+                                    <p className="mt-1 text-lg font-semibold">
+                                        {selectedItem.subscription.next_payment_date ? formatDateForDisplay(selectedItem.subscription.next_payment_date) : 'No date'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="rounded-md border p-3 text-sm">
+                                <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Billing Cycle</p>
+                                <p className="mt-1 font-medium">{selectedItem.subscription.billing_cycle}</p>
+                            </div>
+                            <Button variant="outline" asChild>
+                                <Link href="/subscriptions">
+                                    Open Subscriptions
+                                    <ArrowRight className="h-4 w-4" />
+                                </Link>
+                            </Button>
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

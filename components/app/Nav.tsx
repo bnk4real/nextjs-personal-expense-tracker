@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import CalculatorDialog from '@/components/ui/calculator-dialog';
-import { User, Settings, LogOut, Menu, DollarSign } from 'lucide-react';
+import { User, Settings, LogOut, Menu, Landmark } from 'lucide-react';
 
 interface NavProps {
     onSidebarToggle: () => void;
@@ -70,44 +70,38 @@ export default function Nav({ onSidebarToggle }: NavProps) {
     }, [router]);
 
     return (
-        <nav className="border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
-            <div className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex justify-between h-16">
+        <nav className="sticky top-0 z-30 border-b border-zinc-200 bg-white/85 backdrop-blur supports-backdrop-filter:bg-white/70">
+            <div className="mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex h-14 justify-between">
                     <div className="flex items-center">
-                        {/* Mobile sidebar toggle */}
                         <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon-sm"
                             onClick={onSidebarToggle}
                             className="mr-2 lg:hidden"
+                            aria-label="Open navigation"
                         >
                             <Menu className="w-5 h-5" />
                         </Button>
 
-                        {/* Desktop sidebar toggle */}
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={onSidebarToggle}
-                            className="mr-2 hidden lg:flex"
-                        >
-                            <Menu className="w-5 h-5" />
-                        </Button>
-
-                        <Link href="/" className="flex items-center space-x-2">
-                            <DollarSign className="w-5 h-5 text-base bg-white" /> SubTracker
+                        <Link href="/" className="flex items-center gap-2 text-sm font-semibold text-zinc-950 lg:hidden">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-950 text-white">
+                                <Landmark className="h-4 w-4" />
+                            </span>
+                            SubTracker
                         </Link>
+                        <div className="hidden lg:block">
+                            <p className="text-sm font-medium text-zinc-950">Personal finance workspace</p>
+                            <p className="text-xs text-zinc-500">Ledger, imports, accounts, and review tools</p>
+                        </div>
                     </div>
 
-                    {/* Empty div to maintain layout balance */}
                     <div className="flex items-center space-x-2">
-                        {/* Calculator Dialog */}
                         <CalculatorDialog />
 
-                        {/* Profile Dropdown */}
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                                <Button variant="ghost" className="relative h-9 w-9 rounded-full">
                                     <Avatar className="h-8 w-8">
                                         <AvatarImage src={user?.avatar || undefined} alt="Profile" />
                                         <AvatarFallback>

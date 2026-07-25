@@ -33,18 +33,19 @@ model ai_models {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model people {
-  first_name    String?         @default("")
-  last_name     String?
-  username      String?         @unique
-  password_hash String?
-  created_at    DateTime        @default(now())
-  user_id       String          @id @db.Uuid
-  email         String?         @unique
-  avatar        String?
-  sessions      sessions[]
-  subscriptions subscriptions[]
-  categories    Category[]
-  chatSessions  ChatSession[]
+  first_name     String?         @default("")
+  last_name      String?
+  username       String?         @unique
+  password_hash  String?
+  created_at     DateTime        @default(now())
+  user_id        String          @id @db.Uuid
+  email          String?         @unique
+  avatar         String?
+  sessions       sessions[]
+  subscriptions  subscriptions[]
+  categories     Category[]
+  chatSessions   ChatSession[]
+  monthlyBudgets MonthlyBudget[]
 }
 
 model sessions {
@@ -59,24 +60,24 @@ model sessions {
 }
 
 model subscriptions {
-  id                String    @id @default(uuid()) @db.Uuid
-  user_id           String    @db.Uuid
+  id                String                @id @default(uuid()) @db.Uuid
+  user_id           String                @db.Uuid
   name              String
   provider          String?
   price_cents       Int
-  currency          String    @default("USD")
-  billing_cycle     String    @default("monthly")
-  start_date        DateTime  @default(now())
+  currency          String                @default("USD")
+  billing_cycle     String                @default("monthly")
+  start_date        DateTime              @default(now())
   next_payment_date DateTime?
-  status            String    @default("active")
+  status            String                @default("active")
   end_date          DateTime?
   website_url       String?
   notes             String?
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-  people            people    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  created_at        DateTime              @default(now())
+  updated_at        DateTime              @updatedAt
+  people            people                @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   categoryId        Int?
-  category          Category? @relation(fields: [categoryId], references: [id])
+  category          Category?             @relation(fields: [categoryId], references: [id])
   payments          SubscriptionPayment[]
 
   @@index([next_payment_date])
@@ -85,19 +86,19 @@ model subscriptions {
 }
 
 model SubscriptionPayment {
-  id              String    @id @default(uuid()) @db.Uuid
-  subscriptionId  String    @db.Uuid
-  amount          Int       // price in cents
-  currency        String    @default("USD")
-  paymentDate     DateTime? // actual payment date
-  dueDate         DateTime  // scheduled due date
-  status          String    @default("pending") // 'paid', 'pending', 'overdue', 'cancelled'
-  paymentMethod   String?   // optional payment method
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
-  subscription    subscriptions @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  
+  id             String    @id @default(uuid()) @db.Uuid
+  subscriptionId String    @db.Uuid
+  amount         Int // price in cents
+  currency       String    @default("USD")
+  paymentDate    DateTime? // actual payment date
+  dueDate        DateTime // scheduled due date
+  status         String    @default("pending") // 'paid', 'pending', 'overdue', 'cancelled'
+  paymentMethod  String? // optional payment method
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  subscription subscriptions @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
   @@index([subscriptionId])
   @@index([paymentDate])
   @@index([dueDate])
@@ -118,27 +119,27 @@ model Expense {
 }
 
 model Category {
-  id        Int      @id @default(autoincrement())
-  name      String
-  user_id   String?  @db.Uuid
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      people?  @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  id            Int             @id @default(autoincrement())
+  name          String
+  user_id       String?         @db.Uuid
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  user          people?         @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   subscriptions subscriptions[]
 
   @@unique([name, user_id])
 }
 
 model Account {
-  id          Int       @id @default(autoincrement())
-  name        String
-  type        String
-  balance     Float     @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  creditLimit Float?
-  expenses    Expense[]
-  incomes     Income[]
+  id           Int        @id @default(autoincrement())
+  name         String
+  type         String
+  balance      Float      @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  creditLimit  Float?
+  expenses     Expense[]
+  incomes      Income[]
   transfersOut Transfer[] @relation("TransferFromAccount")
   transfersIn  Transfer[] @relation("TransferToAccount")
 }
@@ -159,17 +160,17 @@ model Income {
 }
 
 model Transfer {
-  id            Int      @id @default(autoincrement())
-  amount        Float
-  date          String
-  description   String
-  fromAccountId Int?
-  toAccountId   Int?
-  affectsBalance Boolean @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  fromAccount   Account? @relation("TransferFromAccount", fields: [fromAccountId], references: [id])
-  toAccount     Account? @relation("TransferToAccount", fields: [toAccountId], references: [id])
+  id             Int      @id @default(autoincrement())
+  amount         Float
+  date           String
+  description    String
+  fromAccountId  Int?
+  toAccountId    Int?
+  affectsBalance Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  fromAccount    Account? @relation("TransferFromAccount", fields: [fromAccountId], references: [id])
+  toAccount      Account? @relation("TransferToAccount", fields: [toAccountId], references: [id])
 
   @@index([date])
   @@index([fromAccountId])
@@ -215,4 +216,33 @@ model ChatMessage {
 
   @@index([sessionId])
   @@index([createdAt])
+}
+
+model MonthlyBudget {
+  id               Int                   @id @default(autoincrement())
+  userId           String                @db.Uuid
+  month            String
+  amountCents      Int
+  warningThreshold Int                   @default(90)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  user             people                @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+  categoryLimits   BudgetCategoryLimit[]
+
+  @@unique([userId, month])
+  @@index([userId])
+  @@index([month])
+}
+
+model BudgetCategoryLimit {
+  id          Int           @id @default(autoincrement())
+  budgetId    Int
+  category    String
+  amountCents Int
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  budget      MonthlyBudget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, category])
+  @@index([budgetId])
 }

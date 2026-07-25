@@ -13,11 +13,11 @@ type PageHeaderProps = {
 
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
     return (
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-4 rounded-md border bg-white px-5 py-4 shadow-xs sm:flex-row sm:items-start sm:justify-between">
             <div>
-                <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+                <h1 className="text-2xl font-semibold tracking-normal text-zinc-950">{title}</h1>
                 {description && (
-                    <p className="mt-2 text-muted-foreground">{description}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{description}</p>
                 )}
             </div>
             {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
@@ -40,7 +40,7 @@ export function MetricTile({ label, value, tone = 'neutral' }: MetricTileProps) 
     }[tone];
 
     return (
-        <Card className="rounded-md">
+        <Card className="rounded-md bg-white shadow-xs">
             <CardContent className="p-4">
                 <p className="text-sm text-muted-foreground">{label}</p>
                 <p className={cn('mt-1 text-2xl font-semibold tabular-nums', toneClass)}>{value}</p>
@@ -87,7 +87,7 @@ export function AmountText({ amount, type }: { amount: number; type: 'expense' |
 
 export function AccountBadge({ children }: { children: ReactNode }) {
     return (
-        <Badge variant="secondary" className="max-w-56 truncate font-normal">
+        <Badge variant="secondary" className="max-w-full truncate font-normal">
             {children}
         </Badge>
     );

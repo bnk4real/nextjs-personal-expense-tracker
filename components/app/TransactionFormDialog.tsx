@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { ArrowRightLeft, Plus, TrendingDown, TrendingUp } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ArrowRightLeft, Plus, TrendingDown, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
-import { Account, Category, Transfer } from '@/lib/types';
+import { Account, BudgetWarning, Category, Transfer } from '@/lib/types';
 import { getTodayString, localDateToUTCString } from '@/lib/format_date';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -64,6 +65,18 @@ function money(value: number) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     });
+}
+
+function monthName(month: string) {
+    const [year, monthNumber] = month.split('-').map(Number);
+    return new Date(year, monthNumber - 1, 1).toLocaleDateString('en-US', {
+        month: 'long',
+        year: 'numeric',
+    });
+}
+
+function moneyFromCents(value: number) {
+    return money(value / 100);
 }
 
 function isTransferAccount(account: Account) {
@@ -163,6 +176,8 @@ export function TransactionFormDialog({
     const isOpen = open ?? internalOpen;
     const setOpen = onOpenChange ?? setInternalOpen;
     const [form, setForm] = useState(() => formFromInitialData(type, initialData));
+    const [budgetWarning, setBudgetWarning] = useState<BudgetWarning | null>(null);
+    const [checkingBudget, setCheckingBudget] = useState(false);
     const isEditing = Boolean(initialData && 'id' in initialData && initialData.id !== undefined);
 
     const categoryOptions = useMemo(() => {
@@ -193,10 +208,71 @@ export function TransactionFormDialog({
 
     const sourceOptions = incomeSources.map((source) => ({ value: source, label: source }));
 
+    useEffect(() => {
+        if (
+            type !== 'expense'
+            || !isOpen
+            || !form.date
+            || !form.category
+            || !Number.isFinite(Number(form.amount))
+            || Number(form.amount) <= 0
+        ) {
+            setBudgetWarning(null);
+            setCheckingBudget(false);
+            return;
+        }
+
+        const controller = new AbortController();
+        const timer = window.setTimeout(async () => {
+            setCheckingBudget(true);
+            try {
+                const response = await fetch('/api/budgets/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        amount: Number(form.amount),
+                        category: form.category,
+                        date: localDateToUTCString(form.date),
+                        expenseId: isEditing ? (initialData as ExpenseInitial).id : undefined,
+                    }),
+                    signal: controller.signal,
+                });
+
+                if (!response.ok) {
+                    setBudgetWarning(null);
+                    return;
+                }
+
+                const data = await response.json();
+                setBudgetWarning(data.warning || null);
+            } catch (error) {
+                if (!(error instanceof DOMException && error.name === 'AbortError')) {
+                    setBudgetWarning(null);
+                }
+            } finally {
+                if (!controller.signal.aborted) setCheckingBudget(false);
+            }
+        }, 350);
+
+        return () => {
+            window.clearTimeout(timer);
+            controller.abort();
+        };
+    }, [
+        form.amount,
+        form.category,
+        form.date,
+        initialData,
+        isEditing,
+        isOpen,
+        type,
+    ]);
+
     const handleOpenChange = (nextOpen: boolean) => {
         setOpen(nextOpen);
         if (!nextOpen) {
             setForm(defaultForm(type));
+            setBudgetWarning(null);
         }
     };
 
@@ -432,12 +508,52 @@ export function TransactionFormDialog({
                         </>
                     )}
 
+                    {type === 'expense' && budgetWarning && (
+                        <div className={cn(
+                            'flex gap-3 rounded-md border p-3',
+                            budgetWarning.level === 'over'
+                                ? 'border-red-200 bg-red-50 text-red-900'
+                                : 'border-amber-200 bg-amber-50 text-amber-950'
+                        )}>
+                            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                            <div className="min-w-0">
+                                <p className="text-sm font-medium">
+                                    {budgetWarning.level === 'over'
+                                        ? `This expense will exceed the ${monthName(budgetWarning.month)} budget by ${moneyFromCents(Math.abs(budgetWarning.remainingAfterCents))}.`
+                                        : `This expense will bring ${monthName(budgetWarning.month)} spending to ${budgetWarning.percentUsed.toFixed(1)}%.`}
+                                </p>
+                                <p className={cn(
+                                    'mt-1 text-xs leading-5',
+                                    budgetWarning.level === 'over' ? 'text-red-700' : 'text-amber-800'
+                                )}>
+                                    Projected total: {moneyFromCents(budgetWarning.projectedSpentCents)} of {moneyFromCents(budgetWarning.budgetCents)}.
+                                    {budgetWarning.remainingAfterCents >= 0
+                                        ? ` ${moneyFromCents(budgetWarning.remainingAfterCents)} will remain.`
+                                        : ' You can still save this expense.'}
+                                </p>
+                                {budgetWarning.category && budgetWarning.category.level !== 'on-track' && (
+                                    <p className={cn(
+                                        'mt-1 text-xs leading-5',
+                                        budgetWarning.level === 'over' ? 'text-red-700' : 'text-amber-800'
+                                    )}>
+                                        {budgetWarning.category.name} will be at {budgetWarning.category.percentUsed.toFixed(1)}% of its category limit.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex justify-end gap-2">
                         <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
                             Cancel
                         </Button>
-                        <Button type="submit">
-                            {isEditing ? 'Save Changes' : type === 'expense' ? (
+                        <Button type="submit" disabled={checkingBudget}>
+                            {type === 'expense' && budgetWarning ? (
+                                <>
+                                    <AlertTriangle className="mr-2 h-4 w-4" />
+                                    Continue & Save
+                                </>
+                            ) : isEditing ? 'Save Changes' : type === 'expense' ? (
                                 <>
                                     <TrendingDown className="mr-2 h-4 w-4" />
                                     Add Expense
