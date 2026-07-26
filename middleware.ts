@@ -14,8 +14,10 @@ export function middleware(request: NextRequest) {
     const isPublicRoute = publicRoutes.some(route => request.nextUrl.pathname.startsWith(route));
 
     // API routes that require authentication
-    const protectedApiRoutes = ['/api/user', '/api/expenses', '/api/accounts', '/api/categories', '/api/incomes', '/api/subscriptions', '/api/imports', '/api/transfers'];
-    const isProtectedApiRoute = protectedApiRoutes.some(route => request.nextUrl.pathname.startsWith(route));
+    const protectedApiRoutes = ['/api/user', '/api/expenses', '/api/accounts', '/api/categories', '/api/incomes', '/api/subscriptions', '/api/imports', '/api/transfers', '/api/plaid'];
+    const isPlaidWebhook = request.nextUrl.pathname === '/api/plaid/webhook';
+    const isProtectedApiRoute = !isPlaidWebhook
+        && protectedApiRoutes.some(route => request.nextUrl.pathname.startsWith(route));
 
     // If accessing a protected API route without token, return 401
     if (isProtectedApiRoute && !token) {

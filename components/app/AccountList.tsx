@@ -16,6 +16,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { AddTransactionButton } from '@/components/app/TransactionFormDialog';
+import { PlaidConnections } from '@/components/app/PlaidConnections';
 
 const ACCOUNT_TYPES = [
     'Cash',
@@ -340,6 +341,8 @@ export default function AccountList() {
                     </>
                 )}
             />
+
+            <PlaidConnections onChanged={fetchAccounts} />
 
             {duplicateGroups.length > 0 && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">

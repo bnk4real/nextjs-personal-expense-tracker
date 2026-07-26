@@ -48,6 +48,7 @@ model people {
   monthlyBudgets        MonthlyBudget[]
   aiSettings            AiProviderSetting[]
   transactionProvenance TransactionProvenance[]
+  plaidItems            PlaidItem[]
 }
 
 model sessions {
@@ -134,17 +135,18 @@ model Category {
 }
 
 model Account {
-  id           Int        @id @default(autoincrement())
-  name         String
-  type         String
-  balance      Float      @default(0)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  creditLimit  Float?
-  expenses     Expense[]
-  incomes      Income[]
-  transfersOut Transfer[] @relation("TransferFromAccount")
-  transfersIn  Transfer[] @relation("TransferToAccount")
+  id            Int            @id @default(autoincrement())
+  name          String
+  type          String
+  balance       Float          @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  creditLimit   Float?
+  expenses      Expense[]
+  incomes       Income[]
+  transfersOut  Transfer[]     @relation("TransferFromAccount")
+  transfersIn   Transfer[]     @relation("TransferToAccount")
+  plaidAccounts PlaidAccount[]
 }
 
 model Income {
@@ -183,29 +185,105 @@ model Transfer {
 }
 
 model TransactionProvenance {
-  id                  String    @id @default(uuid()) @db.Uuid
-  userId              String    @db.Uuid
+  id                  String            @id @default(uuid()) @db.Uuid
+  userId              String            @db.Uuid
   sourceType          String
   source              String
   externalId          String?
   importHash          String?
-  currency            String    @default("USD")
+  currency            String            @default("USD")
   originalDescription String
   rawPayload          Json?
-  importedAt          DateTime  @default(now())
+  importedAt          DateTime          @default(now())
   lastSyncedAt        DateTime?
-  expenseId           Int?      @unique
-  incomeId            Int?      @unique
-  transferId          Int?      @unique
-  user                people    @relation(fields: [userId], references: [user_id], onDelete: Cascade)
-  expense             Expense?  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
-  income              Income?   @relation(fields: [incomeId], references: [id], onDelete: Cascade)
-  transfer            Transfer? @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  expenseId           Int?              @unique
+  incomeId            Int?              @unique
+  transferId          Int?              @unique
+  user                people            @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+  expense             Expense?          @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  income              Income?           @relation(fields: [incomeId], references: [id], onDelete: Cascade)
+  transfer            Transfer?         @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  plaidTransaction    PlaidTransaction?
 
   @@unique([userId, importHash])
   @@unique([userId, source, externalId])
   @@index([userId, importedAt])
   @@index([sourceType, source])
+}
+
+model PlaidItem {
+  id                   String         @id @default(uuid()) @db.Uuid
+  userId               String         @db.Uuid
+  itemId               String         @unique
+  encryptedAccessToken String
+  institutionId        String?
+  institutionName      String?
+  cursor               String?
+  status               String         @default("syncing")
+  errorCode            String?
+  errorMessage         String?
+  autoImportStartDate  String
+  lastSyncedAt         DateTime?
+  lastWebhookAt        DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  user                 people         @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+  accounts             PlaidAccount[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model PlaidAccount {
+  id               String             @id @default(uuid()) @db.Uuid
+  plaidItemId      String             @db.Uuid
+  accountId        String             @unique
+  localAccountId   Int?
+  name             String
+  officialName     String?
+  mask             String?
+  type             String
+  subtype          String?
+  currentBalance   Float?
+  availableBalance Float?
+  creditLimit      Float?
+  currency         String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  item             PlaidItem          @relation(fields: [plaidItemId], references: [id], onDelete: Cascade)
+  localAccount     Account?           @relation(fields: [localAccountId], references: [id], onDelete: SetNull)
+  transactions     PlaidTransaction[]
+
+  @@index([plaidItemId])
+  @@index([localAccountId])
+}
+
+model PlaidTransaction {
+  id                   String                 @id @default(uuid()) @db.Uuid
+  plaidAccountId       String                 @db.Uuid
+  transactionId        String                 @unique
+  pendingTransactionId String?
+  provenanceId         String?                @unique @db.Uuid
+  date                 String
+  authorizedDate       String?
+  amountCents          Int
+  currency             String
+  name                 String
+  merchantName         String?
+  categoryPrimary      String?
+  categoryDetailed     String?
+  pending              Boolean                @default(false)
+  status               String                 @default("staged")
+  rawPayload           Json
+  removedAt            DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  plaidAccount         PlaidAccount           @relation(fields: [plaidAccountId], references: [id], onDelete: Cascade)
+  provenance           TransactionProvenance? @relation(fields: [provenanceId], references: [id], onDelete: SetNull)
+
+  @@index([plaidAccountId, date])
+  @@index([pendingTransactionId])
+  @@index([status])
 }
 
 model Debt {

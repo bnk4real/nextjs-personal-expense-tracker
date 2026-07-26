@@ -2,8 +2,22 @@
 
 ## Next Up
 
-These features are committed for the next development phase, but are not in
-active implementation yet.
+These features are committed for the next development phase.
+
+## Current Delivery Decision
+
+Plaid Production is paused. Production access requires business, product,
+compliance, and billing information that is not ready yet. Until that work
+starts:
+
+- Manual entry and Bank of America/Chase CSV imports remain the primary workflow.
+- The Plaid integration stays available in Sandbox for development only.
+- Do not connect real financial accounts or enable Production credentials.
+- Resume Production work after the business entity, product website, privacy
+  policy, terms, data-deletion process, and Plaid approval path are ready.
+- Keep `PLAID_ENV="sandbox"` locally and use the Sandbox secret.
+
+This is a launch-readiness dependency, not a discarded feature.
 
 ### 1. Transaction Rules Engine
 
@@ -45,11 +59,18 @@ Initial scope:
 
 1. [x] Define the normalized transaction and provenance contract.
 2. [ ] Build the rules engine and test it against existing imported history.
-3. [ ] Add Plaid in sandbox mode.
-4. [ ] Add webhook processing and transaction review.
+3. [x] Add Plaid in sandbox mode.
+4. [ ] Finish transaction review and connection-repair UX.
 5. [ ] Validate duplicate and transfer handling before enabling production sync.
+6. [ ] Prepare business/compliance materials and request Plaid Production access.
 
 The normalized contract is now the boundary for Chase and Bank of America CSV
 imports. Provenance stores the source, original description, import hash,
 currency, raw source metadata, and owning user so future rules and bank syncs
 can share the same ingestion path.
+
+Plaid Sandbox now includes Link onboarding, encrypted access-token storage,
+account mapping, balance snapshots, cursor-based transaction sync, signed
+webhook verification, manual refresh, disconnect, and idempotent provenance.
+Pending items, transfers, and credit-card payments are staged for review until
+the rules and review workflow are implemented.

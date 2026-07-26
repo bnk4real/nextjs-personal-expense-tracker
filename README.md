@@ -2,6 +2,9 @@
 
 A comprehensive personal finance management application built with Next.js, featuring subscription tracking, expense management, income tracking with tax calculations, and detailed state tax information.
 
+Development priorities and the current Plaid Production hold are tracked in
+[docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## ✨ Features
 
 ### 🔐 Authentication
@@ -26,6 +29,13 @@ A comprehensive personal finance management application built with Next.js, feat
 - Tax calculation integration
 - State and filing status support
 - Account balance updates
+
+### 🏦 Automatic Bank Sync
+- Plaid Link onboarding and account mapping
+- Encrypted server-side access tokens
+- Cursor-based transaction sync with signed webhooks
+- Manual refresh, sync health, and disconnect controls
+- Review staging for pending activity, transfers, and credit-card payments
 
 ### 🧾 Tax Calculations
 - **Federal Tax**: Progressive brackets for all filing statuses
@@ -78,6 +88,13 @@ A comprehensive personal finance management application built with Next.js, feat
    AI_SETTINGS_ENCRYPTION_KEY="a-long-random-secret"
    NEXTAUTH_SECRET="your-nextauth-secret"
    NEXTAUTH_URL="http://localhost:4000"
+   PLAID_CLIENT_ID="your-plaid-client-id"
+   PLAID_SECRET="your-plaid-sandbox-secret"
+   PLAID_ENV="sandbox"
+   PLAID_TOKEN_ENCRYPTION_KEY="a-separate-long-random-secret"
+   PLAID_AUTO_IMPORT_START_DATE="2026-07-26"
+   # Set this after the app has a public HTTPS endpoint.
+   PLAID_WEBHOOK_URL="https://yourdomain.com/api/plaid/webhook"
    ```
 
 4. **Set up the database**
@@ -163,6 +180,13 @@ expense-tracker/
 - `GET /api/accounts` - Get all accounts
 - `POST /api/accounts` - Create account
 
+### Plaid
+- `POST /api/plaid/link-token` - Start Plaid Link
+- `POST /api/plaid/exchange` - Store a completed connection and run initial sync
+- `GET|DELETE /api/plaid/connections` - View or disconnect institutions
+- `POST /api/plaid/sync` - Manually sync connected institutions
+- `POST /api/plaid/webhook` - Receive verified Plaid transaction updates
+
 ### Subscriptions
 - `GET /api/subscriptions` - Get user subscriptions
 - `POST /api/subscriptions` - Create subscription
@@ -236,6 +260,12 @@ JWT_SECRET="your-production-jwt-secret"
 AI_SETTINGS_ENCRYPTION_KEY="a-long-random-secret"
 NEXTAUTH_SECRET="your-production-nextauth-secret"
 NEXTAUTH_URL="https://yourdomain.com"
+PLAID_CLIENT_ID="your-plaid-client-id"
+PLAID_SECRET="your-plaid-production-secret"
+PLAID_ENV="production"
+PLAID_TOKEN_ENCRYPTION_KEY="a-separate-long-random-secret"
+PLAID_AUTO_IMPORT_START_DATE="2026-07-26"
+PLAID_WEBHOOK_URL="https://yourdomain.com/api/plaid/webhook"
 ```
 
 ### Build and Deploy
