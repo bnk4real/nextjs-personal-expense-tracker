@@ -1,4 +1,4 @@
-# Expense Tracker UI Redesign V2
+# SubTracker UI Redesign V2
 
 ## Direction
 

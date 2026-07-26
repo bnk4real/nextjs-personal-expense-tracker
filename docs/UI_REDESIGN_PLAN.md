@@ -1,4 +1,4 @@
-# Expense Tracker UI Redesign Plan
+# SubTracker UI Redesign Plan
 
 ## Goal
 

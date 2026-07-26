@@ -1,4 +1,4 @@
-# Subscription Payment Migration Guide
+# SubTracker Subscription Payment Migration Guide
 
 ## Overview
 This guide helps you migrate existing subscription payment history into the new recurring payment system.

@@ -5,6 +5,12 @@ A comprehensive personal finance management application built with Next.js, feat
 Development priorities and the current Plaid Production hold are tracked in
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
+Additional project documentation:
+
+- [UI redesign plan](docs/UI_REDESIGN_PLAN.md)
+- [UI redesign V2](docs/UI_REDESIGN_V2_PLAN.md)
+- [Subscription payment migration guide](docs/MIGRATION_GUIDE.md)
+
 ## ✨ Features
 
 ### 🔐 Authentication
