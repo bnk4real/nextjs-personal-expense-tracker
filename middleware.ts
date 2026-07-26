@@ -3,6 +3,11 @@ import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
     const token = request.cookies.get('token')?.value || request.headers.get('authorization')?.replace('Bearer ', '');
+    const isStaticAsset = /\.[a-z0-9]+$/i.test(request.nextUrl.pathname);
+
+    if (isStaticAsset) {
+        return NextResponse.next();
+    }
 
     // Public routes that don't require authentication
     const publicRoutes = ['/login', '/register'];
