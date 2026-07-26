@@ -2,15 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { prisma } from '@/lib/prisma';
 import { summarizeBudget } from '@/lib/budget';
+import { getGeminiRuntimeConfig } from '@/lib/ai-settings';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
 const DETAIL_ROW_LIMIT = 350;
-
-if (!GEMINI_API_KEY) {
-    console.error('GEMINI_API_KEY environment variable is not set');
-}
 
 type DecodedToken = {
     user_id: string;
@@ -643,7 +639,8 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
 
-        if (!GEMINI_API_KEY) {
+        const geminiConfig = await getGeminiRuntimeConfig(decoded.user_id);
+        if (!geminiConfig) {
             return NextResponse.json({ error: 'AI service not configured' }, { status: 503 });
         }
 
@@ -683,8 +680,8 @@ ${conversationContext}
 
 Answer the latest user message now.`;
 
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const genAI = new GoogleGenerativeAI(geminiConfig.apiKey);
+        const model = genAI.getGenerativeModel({ model: geminiConfig.model });
         const titlePromise = isNew
             ? model.generateContent(`Create a concise session title for the user's first message below.
 Rules:

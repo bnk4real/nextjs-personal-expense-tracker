@@ -1,13 +1,36 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Camera, Loader2, Lock, Mail, Save, User as UserIcon } from 'lucide-react';
+import {
+    Bot,
+    Camera,
+    CheckCircle2,
+    KeyRound,
+    Loader2,
+    Lock,
+    Mail,
+    PlugZap,
+    Save,
+    Trash2,
+    User as UserIcon,
+} from 'lucide-react';
 import { EmptyState, PageHeader } from '@/components/app/WorkspaceUI';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 
@@ -21,12 +44,40 @@ interface User {
     createdAt?: string;
 }
 
+interface GeminiSettings {
+    configured: boolean;
+    savedInApp: boolean;
+    source: 'database' | 'environment' | 'none';
+    keyHint: string | null;
+    model: string;
+    isEnabled: boolean;
+    lastValidatedAt: string | null;
+    encryptionReady: boolean;
+}
+
+const GEMINI_MODELS = [
+    {
+        value: 'gemini-2.5-flash',
+        label: 'Gemini 2.5 Flash',
+        searchText: 'gemini 2.5 flash fast',
+    },
+];
+
 export default function SettingsPage() {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
     const [savingProfile, setSavingProfile] = useState(false);
     const [savingPassword, setSavingPassword] = useState(false);
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
+    const [geminiSettings, setGeminiSettings] = useState<GeminiSettings | null>(null);
+    const [loadingGemini, setLoadingGemini] = useState(true);
+    const [savingGemini, setSavingGemini] = useState(false);
+    const [testingGemini, setTestingGemini] = useState(false);
+    const [removingGemini, setRemovingGemini] = useState(false);
+    const [removeGeminiOpen, setRemoveGeminiOpen] = useState(false);
+    const [geminiApiKey, setGeminiApiKey] = useState('');
+    const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
+    const [geminiEnabled, setGeminiEnabled] = useState(true);
     const [profileData, setProfileData] = useState({
         firstName: '',
         lastName: '',
@@ -69,9 +120,99 @@ export default function SettingsPage() {
         }
     };
 
+    const fetchGeminiSettings = async () => {
+        setLoadingGemini(true);
+        try {
+            const response = await fetch('/api/ai-settings/gemini', {
+                cache: 'no-store',
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed to load Gemini settings');
+
+            setGeminiSettings(data);
+            setGeminiModel(data.model || 'gemini-2.5-flash');
+            setGeminiEnabled(data.isEnabled !== false);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to load Gemini settings');
+        } finally {
+            setLoadingGemini(false);
+        }
+    };
+
     useEffect(() => {
         fetchUserProfile();
+        fetchGeminiSettings();
     }, []);
+
+    const testGeminiConnection = async () => {
+        setTestingGemini(true);
+        try {
+            const response = await fetch('/api/ai-settings/gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    apiKey: geminiApiKey,
+                    model: geminiModel,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Gemini connection failed');
+
+            toast.success(`Gemini connected with ${data.model}`);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Gemini connection failed');
+        } finally {
+            setTestingGemini(false);
+        }
+    };
+
+    const saveGeminiSettings = async (event: React.FormEvent) => {
+        event.preventDefault();
+        setSavingGemini(true);
+        try {
+            const response = await fetch('/api/ai-settings/gemini', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    apiKey: geminiApiKey,
+                    model: geminiModel,
+                    isEnabled: geminiEnabled,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed to save Gemini settings');
+
+            setGeminiSettings(data);
+            setGeminiApiKey('');
+            toast.success('Gemini settings saved');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to save Gemini settings');
+        } finally {
+            setSavingGemini(false);
+        }
+    };
+
+    const removeGeminiSettings = async () => {
+        setRemovingGemini(true);
+        try {
+            const response = await fetch('/api/ai-settings/gemini', {
+                method: 'DELETE',
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || 'Failed to remove Gemini settings');
+
+            setGeminiApiKey('');
+            setRemoveGeminiOpen(false);
+            await fetchGeminiSettings();
+            toast.success(data.fallbackAvailable
+                ? 'Saved Gemini key removed. Environment fallback is active.'
+                : 'Gemini settings removed');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to remove Gemini settings');
+        } finally {
+            setRemovingGemini(false);
+        }
+    };
 
     const handleProfileUpdate = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -190,7 +331,7 @@ export default function SettingsPage() {
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-6">
             <PageHeader
                 title="Settings"
-                description="Manage profile details, avatar, and account security."
+                description="Manage profile details, account security, and AI connections."
             />
 
             <Card className="rounded-md">
@@ -224,9 +365,10 @@ export default function SettingsPage() {
             </Card>
 
             <Tabs defaultValue="profile" className="space-y-6">
-                <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsList className="grid w-full max-w-xl grid-cols-3">
                     <TabsTrigger value="profile">Profile</TabsTrigger>
                     <TabsTrigger value="security">Security</TabsTrigger>
+                    <TabsTrigger value="ai">AI</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="profile">
@@ -350,7 +492,183 @@ export default function SettingsPage() {
                         </CardContent>
                     </Card>
                 </TabsContent>
+
+                <TabsContent value="ai">
+                    <Card className="rounded-md">
+                        <CardHeader className="border-b">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Bot className="h-5 w-5" />
+                                        Gemini AI
+                                    </CardTitle>
+                                    <CardDescription className="mt-1">
+                                        Used by AI Assistant and AI transaction drafts.
+                                    </CardDescription>
+                                </div>
+                                {!loadingGemini && (
+                                    <Badge
+                                        variant="outline"
+                                        className={geminiSettings?.configured && geminiSettings.isEnabled
+                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                            : 'border-zinc-200 bg-zinc-50 text-zinc-600'}
+                                    >
+                                        {geminiSettings?.configured && geminiSettings.isEnabled ? (
+                                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                                        ) : (
+                                            <KeyRound className="mr-1 h-3.5 w-3.5" />
+                                        )}
+                                        {geminiSettings?.configured
+                                            ? geminiSettings.isEnabled ? 'Connected' : 'Disabled'
+                                            : 'Not configured'}
+                                    </Badge>
+                                )}
+                            </div>
+                        </CardHeader>
+                        <CardContent className="p-5">
+                            {loadingGemini ? (
+                                <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Loading Gemini settings...
+                                </div>
+                            ) : (
+                                <form onSubmit={saveGeminiSettings} className="space-y-5">
+                                    {geminiSettings?.configured && (
+                                        <div className="grid overflow-hidden rounded-md border bg-zinc-50 sm:grid-cols-3">
+                                            <div className="border-b p-3 sm:border-b-0 sm:border-r">
+                                                <p className="text-xs text-muted-foreground">Key</p>
+                                                <p className="mt-1 text-sm font-medium">{geminiSettings.keyHint}</p>
+                                            </div>
+                                            <div className="border-b p-3 sm:border-b-0 sm:border-r">
+                                                <p className="text-xs text-muted-foreground">Source</p>
+                                                <p className="mt-1 text-sm font-medium">
+                                                    {geminiSettings.source === 'database' ? 'Saved in app' : 'Environment fallback'}
+                                                </p>
+                                            </div>
+                                            <div className="p-3">
+                                                <p className="text-xs text-muted-foreground">Last validated</p>
+                                                <p className="mt-1 text-sm font-medium">
+                                                    {geminiSettings.lastValidatedAt
+                                                        ? new Date(geminiSettings.lastValidatedAt).toLocaleString()
+                                                        : 'Not tested in app'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {!geminiSettings?.encryptionReady && (
+                                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                                            Server encryption is not configured. Set a secure JWT secret or AI settings encryption key before saving.
+                                        </div>
+                                    )}
+
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="gemini-api-key">
+                                                {geminiSettings?.savedInApp ? 'Replace API Key' : 'Gemini API Key'}
+                                            </Label>
+                                            <Input
+                                                id="gemini-api-key"
+                                                type="password"
+                                                value={geminiApiKey}
+                                                onChange={(event) => setGeminiApiKey(event.target.value)}
+                                                placeholder={geminiSettings?.configured
+                                                    ? `Leave blank to keep ${geminiSettings.keyHint}`
+                                                    : 'Enter Gemini API key'}
+                                                autoComplete="new-password"
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                The key is encrypted on the server and is never returned to this page.
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Model</Label>
+                                            <SearchableSelect
+                                                value={geminiModel}
+                                                onValueChange={setGeminiModel}
+                                                options={GEMINI_MODELS}
+                                                placeholder="Select Gemini model"
+                                                searchPlaceholder="Search models..."
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                Gemini 2.5 Flash is the model currently available for this account.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+                                        <div>
+                                            <Label htmlFor="gemini-enabled">Enable Gemini</Label>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                Turn off AI Assistant and AI transaction drafting without removing the saved key.
+                                            </p>
+                                        </div>
+                                        <Switch
+                                            id="gemini-enabled"
+                                            checked={geminiEnabled}
+                                            onCheckedChange={setGeminiEnabled}
+                                        />
+                                    </div>
+
+                                    <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={testGeminiConnection}
+                                            disabled={testingGemini || savingGemini}
+                                        >
+                                            {testingGemini
+                                                ? <Loader2 className="h-4 w-4 animate-spin" />
+                                                : <PlugZap className="h-4 w-4" />}
+                                            Test Connection
+                                        </Button>
+                                        <Button
+                                            type="submit"
+                                            disabled={savingGemini || testingGemini || !geminiSettings?.encryptionReady}
+                                        >
+                                            {savingGemini
+                                                ? <Loader2 className="h-4 w-4 animate-spin" />
+                                                : <Save className="h-4 w-4" />}
+                                            {geminiSettings?.savedInApp ? 'Save Settings' : 'Save Gemini Key'}
+                                        </Button>
+                                        {geminiSettings?.savedInApp && (
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                className="sm:ml-auto"
+                                                onClick={() => setRemoveGeminiOpen(true)}
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                                Remove Saved Key
+                                            </Button>
+                                        )}
+                                    </div>
+                                </form>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
             </Tabs>
+
+            <Dialog open={removeGeminiOpen} onOpenChange={setRemoveGeminiOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Remove Saved Gemini Key?</DialogTitle>
+                        <DialogDescription>
+                            The encrypted key and model settings will be removed. AI will use the environment fallback if it is still configured.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setRemoveGeminiOpen(false)} disabled={removingGemini}>
+                            Cancel
+                        </Button>
+                        <Button variant="destructive" onClick={removeGeminiSettings} disabled={removingGemini}>
+                            <Trash2 />
+                            {removingGemini ? 'Removing...' : 'Remove Key'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { prisma } from '@/lib/prisma';
-
-const GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
+import { getGeminiRuntimeConfig } from '@/lib/ai-settings';
+import { getRequestUser } from '@/lib/server-auth';
 
 const incomeSources = [
     'Salary',
@@ -110,7 +110,13 @@ function normalizeDraft(
 
 export async function POST(request: NextRequest) {
     try {
-        if (!GEMINI_API_KEY) {
+        const user = getRequestUser(request);
+        if (!user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        const geminiConfig = await getGeminiRuntimeConfig(user.user_id);
+        if (!geminiConfig) {
             return NextResponse.json({ error: 'AI service is not configured' }, { status: 503 });
         }
 
@@ -126,8 +132,8 @@ export async function POST(request: NextRequest) {
             prisma.account.findMany({ select: { id: true, name: true, type: true }, orderBy: { createdAt: 'desc' } }),
         ]);
 
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const genAI = new GoogleGenerativeAI(geminiConfig.apiKey);
+        const model = genAI.getGenerativeModel({ model: geminiConfig.model });
         const categoryList = categories.map((category) => category.name).join(', ');
         const accountList = accounts
             .map((account) => `${account.id}: ${account.name} (${account.type})`)

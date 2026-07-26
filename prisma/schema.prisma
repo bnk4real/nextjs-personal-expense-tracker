@@ -33,19 +33,20 @@ model ai_models {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model people {
-  first_name     String?         @default("")
+  first_name     String?             @default("")
   last_name      String?
-  username       String?         @unique
+  username       String?             @unique
   password_hash  String?
-  created_at     DateTime        @default(now())
-  user_id        String          @id @db.Uuid
-  email          String?         @unique
+  created_at     DateTime            @default(now())
+  user_id        String              @id @db.Uuid
+  email          String?             @unique
   avatar         String?
   sessions       sessions[]
   subscriptions  subscriptions[]
   categories     Category[]
   chatSessions   ChatSession[]
   monthlyBudgets MonthlyBudget[]
+  aiSettings     AiProviderSetting[]
 }
 
 model sessions {
@@ -245,4 +246,21 @@ model BudgetCategoryLimit {
 
   @@unique([budgetId, category])
   @@index([budgetId])
+}
+
+model AiProviderSetting {
+  id              Int       @id @default(autoincrement())
+  userId          String    @db.Uuid
+  provider        String
+  encryptedApiKey String
+  keyHint         String
+  model           String
+  isEnabled       Boolean   @default(true)
+  lastValidatedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            people    @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
 }

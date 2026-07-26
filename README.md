@@ -73,6 +73,9 @@ A comprehensive personal finance management application built with Next.js, feat
    ```env
    DATABASE_URL="postgresql://username:password@localhost:5432/expense_tracker"
    JWT_SECRET="your-super-secret-jwt-key-here"
+   # Optional dedicated key for encrypting AI provider credentials.
+   # When omitted, the app derives a separate encryption key from JWT_SECRET.
+   AI_SETTINGS_ENCRYPTION_KEY="a-long-random-secret"
    NEXTAUTH_SECRET="your-nextauth-secret"
    NEXTAUTH_URL="http://localhost:4000"
    ```
@@ -229,6 +232,8 @@ npx prisma db push         # Push schema changes
 ```env
 DATABASE_URL="postgresql://user:pass@host:5432/db"
 JWT_SECRET="your-production-jwt-secret"
+# Optional; JWT_SECRET is used as the fallback encryption secret.
+AI_SETTINGS_ENCRYPTION_KEY="a-long-random-secret"
 NEXTAUTH_SECRET="your-production-nextauth-secret"
 NEXTAUTH_URL="https://yourdomain.com"
 ```
