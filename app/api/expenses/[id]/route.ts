@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { applyExpenseBalanceChange, expenseBalanceError } from '@/lib/account-balances';
 
 export async function GET(
     request: NextRequest,
@@ -29,72 +30,59 @@ export async function PUT(
     try {
         const { amount, category, date, description, accountId } = await request.json();
 
-        // Get the current expense to compare changes
-        const currentExpense = await prisma.expense.findUnique({
-            where: { id: parseInt(id) },
-            include: { account: true }
-        });
-
-        if (!currentExpense) {
-            return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
-        }
-
         const newAmount = parseFloat(amount);
-        const expenseData: Prisma.ExpenseUncheckedUpdateInput = {
-            amount: newAmount,
-            category,
-            date,
-            description
-        };
+        const expense = await prisma.$transaction(async (tx) => {
+            const currentExpense = await tx.expense.findUnique({
+                where: { id: parseInt(id, 10) },
+            });
 
-        // Handle account changes
-        if (accountId !== undefined) {
-            const newAccountId = accountId ? parseInt(accountId) : null;
+            if (!currentExpense) {
+                throw new Error('EXPENSE_NOT_FOUND');
+            }
 
-            // If account changed or amount changed, we need to adjust balances
+            const newAccountId = accountId === undefined
+                ? currentExpense.accountId
+                : accountId
+                    ? parseInt(accountId, 10)
+                    : null;
+
             if (currentExpense.accountId !== newAccountId || currentExpense.amount !== newAmount) {
-
-                // Refund amount to old account if it existed
                 if (currentExpense.accountId) {
-                    const oldAccount = await prisma.account.findUnique({
-                        where: { id: currentExpense.accountId }
-                    });
-                    if (oldAccount) {
-                        await prisma.account.update({
-                            where: { id: currentExpense.accountId },
-                            data: { balance: oldAccount.balance + currentExpense.amount }
-                        });
-                    }
+                    await applyExpenseBalanceChange(
+                        tx,
+                        currentExpense.accountId,
+                        currentExpense.amount,
+                        -1
+                    );
                 }
-
-                // Deduct from new account if specified
                 if (newAccountId) {
-                    const newAccount = await prisma.account.findUnique({
-                        where: { id: newAccountId }
-                    });
-                    if (!newAccount) {
-                        return NextResponse.json({ error: 'New account not found' }, { status: 404 });
-                    }
-                    if (newAccount.balance < newAmount) {
-                        return NextResponse.json({ error: 'Insufficient account balance' }, { status: 400 });
-                    }
-                    await prisma.account.update({
-                        where: { id: newAccountId },
-                        data: { balance: newAccount.balance - newAmount }
-                    });
+                    await applyExpenseBalanceChange(tx, newAccountId, newAmount, 1);
                 }
             }
 
-            expenseData.accountId = newAccountId;
-        }
+            const expenseData: Prisma.ExpenseUncheckedUpdateInput = {
+                amount: newAmount,
+                category,
+                date,
+                description,
+                accountId: newAccountId,
+            };
 
-        const expense = await prisma.expense.update({
-            where: { id: parseInt(id) },
-            data: expenseData,
-            include: { account: true }
+            return tx.expense.update({
+                where: { id: currentExpense.id },
+                data: expenseData,
+                include: { account: true },
+            });
         });
         return NextResponse.json(expense);
     } catch (error) {
+        if (error instanceof Error && error.message === 'EXPENSE_NOT_FOUND') {
+            return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
+        }
+        const balanceError = expenseBalanceError(error);
+        if (balanceError) {
+            return NextResponse.json({ error: balanceError.error }, { status: balanceError.status });
+        }
         return NextResponse.json({ error: 'Failed to update expense' }, { status: 500 });
     }
 }
@@ -105,29 +93,30 @@ export async function DELETE(
 ) {
     const { id } = await params;
     try {
-        // Get the expense before deleting to refund the amount
-        const expense = await prisma.expense.findUnique({
-            where: { id: parseInt(id) },
-            include: { account: true }
-        });
-
-        if (!expense) {
-            return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
-        }
-
-        // Refund amount to account if it was linked to one
-        if (expense.accountId) {
-            await prisma.account.update({
-                where: { id: expense.accountId },
-                data: { balance: { increment: expense.amount } }
+        await prisma.$transaction(async (tx) => {
+            const expense = await tx.expense.findUnique({
+                where: { id: parseInt(id, 10) },
             });
-        }
 
-        await prisma.expense.delete({
-            where: { id: parseInt(id) },
+            if (!expense) {
+                throw new Error('EXPENSE_NOT_FOUND');
+            }
+
+            if (expense.accountId) {
+                await applyExpenseBalanceChange(tx, expense.accountId, expense.amount, -1);
+            }
+
+            await tx.expense.delete({ where: { id: expense.id } });
         });
         return NextResponse.json({ message: 'Expense deleted and amount refunded' });
     } catch (error) {
+        if (error instanceof Error && error.message === 'EXPENSE_NOT_FOUND') {
+            return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
+        }
+        const balanceError = expenseBalanceError(error);
+        if (balanceError) {
+            return NextResponse.json({ error: balanceError.error }, { status: balanceError.status });
+        }
         return NextResponse.json({ error: 'Failed to delete expense' }, { status: 500 });
     }
 }

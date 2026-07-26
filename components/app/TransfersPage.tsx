@@ -44,7 +44,13 @@ export default function TransfersPage() {
         toAccountId: NO_ACCOUNT,
         affectsBalance: true,
     });
-    const transferAccounts = accounts.filter(isTransferAccount);
+    const editingAccountIds = new Set(
+        [editingTransfer?.fromAccountId, editingTransfer?.toAccountId]
+            .filter((id): id is number => id !== null && id !== undefined)
+    );
+    const transferAccounts = accounts.filter(
+        (account) => isTransferAccount(account) || editingAccountIds.has(Number(account.id))
+    );
     const transferTotal = transfers.reduce((sum, transfer) => sum + transfer.amount, 0);
     const balanceAffectingTransfers = transfers.filter((transfer) => transfer.affectsBalance).length;
     const historicalTransfers = transfers.length - balanceAffectingTransfers;
@@ -296,7 +302,11 @@ export default function TransfersPage() {
                                             <td className="whitespace-nowrap px-3 py-3 text-right align-top font-semibold tabular-nums text-blue-600">{money(transfer.amount)}</td>
                                             <td className="px-3 py-3 align-top">
                                                 <Badge variant={transfer.affectsBalance ? 'default' : 'outline'}>
-                                                    {transfer.affectsBalance ? 'Adjusts' : 'Historical'}
+                                                    {transfer.toAccount?.type === 'Credit Card'
+                                                        ? 'Card payment'
+                                                        : transfer.affectsBalance
+                                                            ? 'Adjusts'
+                                                            : 'Historical'}
                                                 </Badge>
                                             </td>
                                             <td className="px-3 py-3 text-right align-top">

@@ -58,17 +58,20 @@ export function EmptyState({ title, description }: { title: string; description?
     );
 }
 
-export function TransactionTypeBadge({ type }: { type: 'expense' | 'income' | 'transfer' }) {
+type LedgerTransactionType = 'expense' | 'income' | 'transfer' | 'payment';
+
+export function TransactionTypeBadge({ type }: { type: LedgerTransactionType }) {
     const config = {
         expense: { label: 'Expense', className: 'border-red-200 bg-red-50 text-red-700' },
         income: { label: 'Income', className: 'border-green-200 bg-green-50 text-green-700' },
         transfer: { label: 'Transfer', className: 'border-blue-200 bg-blue-50 text-blue-700' },
+        payment: { label: 'Card Payment', className: 'border-violet-200 bg-violet-50 text-violet-700' },
     }[type];
 
     return <Badge variant="outline" className={config.className}>{config.label}</Badge>;
 }
 
-export function AmountText({ amount, type }: { amount: number; type: 'expense' | 'income' | 'transfer' }) {
+export function AmountText({ amount, type }: { amount: number; type: LedgerTransactionType }) {
     const formatted = amount.toLocaleString('en-US', {
         style: 'currency',
         currency: 'USD',
@@ -79,7 +82,9 @@ export function AmountText({ amount, type }: { amount: number; type: 'expense' |
         ? 'text-red-600'
         : type === 'income'
             ? 'text-green-600'
-            : 'text-blue-600';
+            : type === 'payment'
+                ? 'text-violet-600'
+                : 'text-blue-600';
     const prefix = type === 'expense' ? '-' : type === 'income' ? '+' : '';
 
     return <span className={cn('font-semibold tabular-nums', className)}>{prefix}{formatted}</span>;

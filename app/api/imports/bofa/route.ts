@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import jwt from 'jsonwebtoken';
 import { parseBofaCsv } from '@/lib/importers/bofa-csv';
+import {
+    centsToDollars,
+    normalizeTransaction,
+    provenanceCreateData,
+} from '@/lib/transactions/contract';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -37,25 +42,6 @@ type ExistingMatch = {
     amount: number;
     description: string;
     accountName: string | null;
-};
-
-type ExpenseImportRow = {
-    amount: number;
-    category: string;
-    date: string;
-    description: string;
-    importSource: string;
-    importHash: string;
-};
-
-type IncomeImportRow = {
-    amount: number;
-    source: string;
-    date: string;
-    description: string;
-    notes: string;
-    importSource: string;
-    importHash: string;
 };
 
 type ParsedBofaFile = {
@@ -119,13 +105,6 @@ async function ensureCategory(name: string) {
     const existing = await prisma.category.findFirst({ where: { name } });
     if (existing) return existing;
     return prisma.category.create({ data: { name } });
-}
-
-function omitImportMetadata<T extends { importSource: string; importHash: string }>(row: T) {
-    const rest = { ...row } as Omit<T, 'importSource' | 'importHash'> & Partial<Pick<T, 'importSource' | 'importHash'>>;
-    delete rest.importSource;
-    delete rest.importHash;
-    return rest;
 }
 
 function normalizeForMatch(value: string) {
@@ -242,7 +221,11 @@ async function findExistingMatches(transactions: BofaTransaction[], accountName:
     return matchesByKey;
 }
 
-function buildPreviewRows(transactions: BofaTransaction[], matchesByKey: Map<string, ExistingMatch[]>): PreviewRow[] {
+function buildPreviewRows(
+    transactions: BofaTransaction[],
+    matchesByKey: Map<string, ExistingMatch[]>,
+    importedHashes: Set<string>
+): PreviewRow[] {
     return transactions.map((transaction) => {
         const type = transaction.kind;
         const matches = matchesByKey.get(matchKey(type, transaction.date, transaction.amount)) || [];
@@ -250,7 +233,7 @@ function buildPreviewRows(transactions: BofaTransaction[], matchesByKey: Map<str
         const hasExactDescriptionMatch = matches.some((match) =>
             normalizeForMatch(match.description) === normalizedImportDescription
         );
-        const duplicateStatus: DuplicateStatus = hasExactDescriptionMatch
+        const duplicateStatus: DuplicateStatus = importedHashes.has(transaction.importHash) || hasExactDescriptionMatch
             ? 'exact_duplicate'
             : matches.length > 0
                 ? 'possible_duplicate'
@@ -331,8 +314,22 @@ export async function POST(request: NextRequest) {
         const uniqueTransactions = [...new Map(
             filteredTransactions.map((transaction) => [transaction.importHash, transaction])
         ).values()];
-        const matchesByKey = await findExistingMatches(uniqueTransactions, accountName);
-        const allPreviewRows = buildPreviewRows(uniqueTransactions, matchesByKey);
+        const [matchesByKey, importedProvenance] = await Promise.all([
+            findExistingMatches(uniqueTransactions, accountName),
+            prisma.transactionProvenance.findMany({
+                where: {
+                    userId: decoded.user_id,
+                    importHash: { in: uniqueTransactions.map((transaction) => transaction.importHash) },
+                },
+                select: { importHash: true },
+            }),
+        ]);
+        const importedHashes = new Set(
+            importedProvenance
+                .map((item) => item.importHash)
+                .filter((hash): hash is string => Boolean(hash))
+        );
+        const allPreviewRows = buildPreviewRows(uniqueTransactions, matchesByKey, importedHashes);
         const importHashByStatus = new Map(allPreviewRows.map((row) => [row.id, row.duplicateStatus]));
         const defaultSelectedImportHashes = new Set(
             allPreviewRows
@@ -341,7 +338,9 @@ export async function POST(request: NextRequest) {
         );
         const activeSelectedImportHashes = commit ? selectedImportHashes : defaultSelectedImportHashes;
         const transactionsToImport = uniqueTransactions.filter((transaction) =>
-            activeSelectedImportHashes?.has(transaction.importHash) && !transaction.isTransferLike
+            activeSelectedImportHashes?.has(transaction.importHash) &&
+            !transaction.isTransferLike &&
+            !importedHashes.has(transaction.importHash)
         );
 
         if (commit && (!selectedImportHashes || selectedImportHashes.size === 0)) {
@@ -349,31 +348,35 @@ export async function POST(request: NextRequest) {
         }
 
         if (commit && transactionsToImport.length === 0) {
-            return NextResponse.json({ error: 'Selected rows are transfers, so nothing can be imported.' }, { status: 400 });
+            return NextResponse.json({ error: 'Selected rows are transfers or already imported, so nothing can be imported.' }, { status: 400 });
         }
 
-        const expenses: ExpenseImportRow[] = transactionsToImport
-            .filter((transaction) => transaction.kind === 'expense')
-            .map((transaction) => ({
-                amount: Math.abs(transaction.amount),
-                category: transaction.category || 'Uncategorized',
-                date: transaction.date,
-                description: transaction.description,
-                importSource: transaction.importSource,
-                importHash: transaction.importHash,
-            }));
-
-        const incomes: IncomeImportRow[] = transactionsToImport
-            .filter((transaction) => transaction.kind === 'income')
-            .map((transaction) => ({
+        const normalizedTransactions = transactionsToImport.map((transaction) => ({
+            sourceRow: transaction,
+            normalized: normalizeTransaction({
+                kind: transaction.kind,
                 amount: transaction.amount,
-                source: transaction.source || 'Other',
                 date: transaction.date,
                 description: transaction.description,
-                notes: `Imported from ${transaction.fileName}`,
-                importSource: transaction.importSource,
-                importHash: transaction.importHash,
-            }));
+                originalDescription: transaction.description,
+                category: transaction.category,
+                incomeSource: transaction.source,
+                isTransferLike: transaction.isTransferLike,
+                provenance: {
+                    sourceType: 'file_import',
+                    source: transaction.importSource,
+                    importHash: transaction.importHash,
+                    rawPayload: {
+                        fileName: transaction.fileName,
+                        rowNumber: transaction.rowNumber,
+                        signedAmount: transaction.amount,
+                        runningBalance: transaction.runningBalance,
+                    },
+                },
+            }),
+        }));
+        const expenses = normalizedTransactions.filter(({ normalized }) => normalized.kind === 'expense');
+        const incomes = normalizedTransactions.filter(({ normalized }) => normalized.kind === 'income');
 
         const ending = latestEndingBalance(parsedFiles);
         const summary = {
@@ -416,25 +419,48 @@ export async function POST(request: NextRequest) {
                 });
             }
 
-            const categories = [...new Set(expenses.map((row) => row.category))];
+            const categories = [...new Set(expenses.map(({ normalized }) => normalized.category || 'Uncategorized'))];
             for (const category of categories) {
                 await ensureCategory(category);
             }
 
-            const [expenseResult, incomeResult] = await prisma.$transaction([
-                prisma.expense.createMany({
-                    data: expenses.map((row) => ({
-                        ...omitImportMetadata(row),
-                        accountId: account.id,
-                    })),
-                }),
-                prisma.income.createMany({
-                    data: incomes.map((row) => ({
-                        ...omitImportMetadata(row),
-                        accountId: account.id,
-                    })),
-                }),
-            ]);
+            const result = await prisma.$transaction(async (tx) => {
+                let createdExpenses = 0;
+                let createdIncomes = 0;
+
+                for (const { sourceRow, normalized } of normalizedTransactions) {
+                    const provenance = { create: provenanceCreateData(decoded.user_id, normalized) };
+
+                    if (normalized.kind === 'expense') {
+                        await tx.expense.create({
+                            data: {
+                                amount: centsToDollars(normalized.amountCents),
+                                category: normalized.category || 'Uncategorized',
+                                date: normalized.date,
+                                description: normalized.description,
+                                accountId: account.id,
+                                provenance,
+                            },
+                        });
+                        createdExpenses++;
+                    } else if (normalized.kind === 'income') {
+                        await tx.income.create({
+                            data: {
+                                amount: centsToDollars(normalized.amountCents),
+                                source: normalized.incomeSource || 'Other',
+                                date: normalized.date,
+                                description: normalized.description,
+                                notes: `Imported from ${sourceRow.fileName}`,
+                                accountId: account.id,
+                                provenance,
+                            },
+                        });
+                        createdIncomes++;
+                    }
+                }
+
+                return { createdExpenses, createdIncomes };
+            });
 
             let accountBalanceSynced = false;
             if (syncBalance && ending?.endingBalance !== null && ending?.endingBalance !== undefined) {
@@ -450,8 +476,8 @@ export async function POST(request: NextRequest) {
                 rows: previewRows,
                 result: {
                     accountId: account.id,
-                    createdExpenses: expenseResult.count,
-                    createdIncomes: incomeResult.count,
+                    createdExpenses: result.createdExpenses,
+                    createdIncomes: result.createdIncomes,
                     accountBalanceSynced,
                 },
             });

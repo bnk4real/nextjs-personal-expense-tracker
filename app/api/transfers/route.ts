@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { isCreditCardAccount } from '@/lib/account-balances';
 
 function parseOptionalAccountId(value: unknown) {
     if (value === null || value === undefined || value === '') return null;
@@ -10,10 +11,6 @@ function parseOptionalAccountId(value: unknown) {
 
 function shouldAffectBalance(value: unknown) {
     return value !== false;
-}
-
-function isCreditCard(type: string) {
-    return type.toLowerCase() === 'credit card';
 }
 
 async function applyTransferBalanceChanges(
@@ -32,7 +29,7 @@ async function applyTransferBalanceChanges(
 
     if (transfer.fromAccountId) {
         const type = accountTypeById.get(transfer.fromAccountId);
-        const delta = type && isCreditCard(type) ? transfer.amount : -transfer.amount;
+        const delta = type && isCreditCardAccount(type) ? transfer.amount : -transfer.amount;
         await tx.account.update({
             where: { id: transfer.fromAccountId },
             data: { balance: { increment: delta * direction } },
@@ -41,7 +38,7 @@ async function applyTransferBalanceChanges(
 
     if (transfer.toAccountId) {
         const type = accountTypeById.get(transfer.toAccountId);
-        const delta = type && isCreditCard(type) ? -transfer.amount : transfer.amount;
+        const delta = type && isCreditCardAccount(type) ? -transfer.amount : transfer.amount;
         await tx.account.update({
             where: { id: transfer.toAccountId },
             data: { balance: { increment: delta * direction } },
@@ -51,22 +48,45 @@ async function applyTransferBalanceChanges(
 
 async function assertTransferAccounts(
     tx: Prisma.TransactionClient,
-    accountIds: number[]
+    transfer: {
+        amount: number;
+        fromAccountId: number | null;
+        toAccountId: number | null;
+        affectsBalance: boolean;
+    }
 ) {
-    const uniqueAccountIds = [...new Set(accountIds)];
+    const uniqueAccountIds = [...new Set(
+        [transfer.fromAccountId, transfer.toAccountId].filter((id): id is number => id !== null)
+    )];
     if (uniqueAccountIds.length === 0) return;
 
     const accounts = await tx.account.findMany({
         where: { id: { in: uniqueAccountIds } },
-        select: { id: true, type: true },
+        select: { id: true, type: true, balance: true },
     });
 
     if (accounts.length !== uniqueAccountIds.length) {
         throw new Error('ACCOUNT_NOT_FOUND');
     }
 
-    if (accounts.some((account) => isCreditCard(account.type))) {
-        throw new Error('CREDIT_CARD_PAYMENT_NOT_TRANSFER');
+    const accountById = new Map(accounts.map((account) => [account.id, account]));
+    const fromAccount = transfer.fromAccountId ? accountById.get(transfer.fromAccountId) : null;
+    const toAccount = transfer.toAccountId ? accountById.get(transfer.toAccountId) : null;
+    const fromIsCreditCard = Boolean(fromAccount && isCreditCardAccount(fromAccount.type));
+    const toIsCreditCard = Boolean(toAccount && isCreditCardAccount(toAccount.type));
+
+    if (fromIsCreditCard || toIsCreditCard) {
+        if (!fromAccount || !toAccount || fromIsCreditCard || !toIsCreditCard) {
+            throw new Error('INVALID_CREDIT_CARD_PAYMENT');
+        }
+
+        if (transfer.affectsBalance && fromAccount.balance < transfer.amount) {
+            throw new Error('INSUFFICIENT_ACCOUNT_BALANCE');
+        }
+
+        if (transfer.affectsBalance && toAccount.balance < transfer.amount) {
+            throw new Error('PAYMENT_EXCEEDS_CARD_BALANCE');
+        }
     }
 }
 
@@ -111,10 +131,12 @@ export async function POST(request: NextRequest) {
         }
 
         const transfer = await prisma.$transaction(async (tx) => {
-            await assertTransferAccounts(
-                tx,
-                [parsedFromAccountId, parsedToAccountId].filter((id): id is number => id !== null)
-            );
+            await assertTransferAccounts(tx, {
+                amount: parsedAmount,
+                fromAccountId: parsedFromAccountId,
+                toAccountId: parsedToAccountId,
+                affectsBalance: parsedAffectsBalance,
+            });
 
             if (parsedAffectsBalance) {
                 await applyTransferBalanceChanges(tx, {
@@ -146,8 +168,16 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Account not found' }, { status: 404 });
         }
 
-        if (error instanceof Error && error.message === 'CREDIT_CARD_PAYMENT_NOT_TRANSFER') {
-            return NextResponse.json({ error: 'Credit card payments are not transfers. Leave them out of income, expense, and transfer records.' }, { status: 400 });
+        if (error instanceof Error && error.message === 'INVALID_CREDIT_CARD_PAYMENT') {
+            return NextResponse.json({ error: 'Credit card payments must move money from a non-credit account to a credit card.' }, { status: 400 });
+        }
+
+        if (error instanceof Error && error.message === 'INSUFFICIENT_ACCOUNT_BALANCE') {
+            return NextResponse.json({ error: 'Insufficient balance in the payment account.' }, { status: 400 });
+        }
+
+        if (error instanceof Error && error.message === 'PAYMENT_EXCEEDS_CARD_BALANCE') {
+            return NextResponse.json({ error: 'Payment cannot exceed the current credit card balance.' }, { status: 400 });
         }
 
         console.error('Error creating transfer:', error);

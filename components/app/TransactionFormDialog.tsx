@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRightLeft, Plus, TrendingDown, TrendingUp } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, CreditCard, Plus, TrendingDown, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { Account, BudgetWarning, Category, Transfer } from '@/lib/types';
 import { getTodayString, localDateToUTCString } from '@/lib/format_date';
@@ -26,7 +26,7 @@ const incomeSources = [
     'Other',
 ];
 
-type TransactionKind = 'expense' | 'income' | 'transfer';
+type TransactionKind = 'expense' | 'income' | 'transfer' | 'payment';
 
 type ExpenseInitial = {
     id?: string | number;
@@ -85,12 +85,18 @@ function isTransferAccount(account: Account) {
 
 function getTitle(type: TransactionKind, editing: boolean) {
     const action = editing ? 'Edit' : 'Add';
-    const label = type === 'expense' ? 'Expense' : type === 'income' ? 'Income' : 'Transfer';
+    const label = type === 'expense'
+        ? 'Expense'
+        : type === 'income'
+            ? 'Income'
+            : type === 'payment'
+                ? 'Credit Card Payment'
+                : 'Transfer';
     return `${action} ${label}`;
 }
 
 function defaultForm(type: TransactionKind) {
-    if (type === 'transfer') {
+    if (type === 'transfer' || type === 'payment') {
         return {
             amount: '',
             date: getTodayString(),
@@ -205,6 +211,45 @@ export function TransactionFormDialog({
             searchText: `${account.name} ${account.type}`,
         })),
     ], [accounts]);
+
+    const paymentAccountOptions = useMemo(() => accounts
+        .filter((account) => account.type !== 'Credit Card')
+        .map((account) => ({
+            value: account.id.toString(),
+            label: `${account.name} (${money(account.balance)} available)`,
+            searchText: `${account.name} ${account.type}`,
+        })), [accounts]);
+
+    const creditCardOptions = useMemo(() => accounts
+        .filter((account) => account.type === 'Credit Card')
+        .map((account) => ({
+            value: account.id.toString(),
+            label: `${account.name} (${money(account.balance)} balance)`,
+            searchText: `${account.name} ${account.type}`,
+        })), [accounts]);
+
+    const paymentPreview = useMemo(() => {
+        if (type !== 'payment') return null;
+
+        const amount = Number(form.amount);
+        const fromAccount = accounts.find((account) => account.id.toString() === form.fromAccountId);
+        const creditCard = accounts.find((account) => account.id.toString() === form.toAccountId);
+        if (!fromAccount || !creditCard || !Number.isFinite(amount) || amount <= 0) return null;
+
+        return {
+            fromAccount,
+            creditCard,
+            amount,
+            nextSourceBalance: fromAccount.balance - amount,
+            nextCardBalance: creditCard.balance - amount,
+            currentAvailableCredit: creditCard.creditLimit == null
+                ? null
+                : creditCard.creditLimit - creditCard.balance,
+            nextAvailableCredit: creditCard.creditLimit == null
+                ? null
+                : creditCard.creditLimit - (creditCard.balance - amount),
+        };
+    }, [accounts, form.amount, form.fromAccountId, form.toAccountId, type]);
 
     const sourceOptions = incomeSources.map((source) => ({ value: source, label: source }));
 
@@ -344,7 +389,7 @@ export function TransactionFormDialog({
                     description: form.description,
                     fromAccountId: form.fromAccountId === NO_ACCOUNT ? null : parseInt(form.fromAccountId, 10),
                     toAccountId: form.toAccountId === NO_ACCOUNT ? null : parseInt(form.toAccountId, 10),
-                    affectsBalance: form.affectsBalance,
+                    affectsBalance: type === 'payment' ? true : form.affectsBalance,
                 };
 
         const response = await fetch(endpoint, {
@@ -384,7 +429,13 @@ export function TransactionFormDialog({
                             id={`${type}-description`}
                             value={form.description}
                             onChange={(event) => setForm({ ...form, description: event.target.value })}
-                            placeholder={type === 'transfer' ? 'Move to savings, Zelle...' : 'Description'}
+                            placeholder={
+                                type === 'payment'
+                                    ? 'Discover payment'
+                                    : type === 'transfer'
+                                        ? 'Move to savings, Zelle...'
+                                        : 'Description'
+                            }
                             required
                         />
                     </div>
@@ -508,6 +559,55 @@ export function TransactionFormDialog({
                         </>
                     )}
 
+                    {type === 'payment' && (
+                        <>
+                            <div className="space-y-2">
+                                <Label>Pay From</Label>
+                                <SearchableSelect
+                                    value={form.fromAccountId}
+                                    onValueChange={(value) => setForm({ ...form, fromAccountId: value })}
+                                    options={paymentAccountOptions}
+                                    placeholder="Select bank or cash account"
+                                    searchPlaceholder="Search payment accounts..."
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Credit Card</Label>
+                                <SearchableSelect
+                                    value={form.toAccountId}
+                                    onValueChange={(value) => setForm({ ...form, toAccountId: value })}
+                                    options={creditCardOptions}
+                                    placeholder="Select credit card"
+                                    searchPlaceholder="Search credit cards..."
+                                />
+                            </div>
+                            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                                <p>This lowers the bank balance and the card balance. It is not counted as a new expense.</p>
+                                {paymentPreview && (
+                                    <div className="mt-3 space-y-1 border-t border-blue-200 pt-3 tabular-nums">
+                                        <p>
+                                            {paymentPreview.fromAccount.name}: {money(paymentPreview.fromAccount.balance)}
+                                            {' → '}
+                                            <strong>{money(paymentPreview.nextSourceBalance)}</strong>
+                                        </p>
+                                        <p>
+                                            {paymentPreview.creditCard.name} balance: {money(paymentPreview.creditCard.balance)}
+                                            {' → '}
+                                            <strong>{money(paymentPreview.nextCardBalance)}</strong>
+                                        </p>
+                                        {paymentPreview.currentAvailableCredit !== null && paymentPreview.nextAvailableCredit !== null && (
+                                            <p>
+                                                Available credit: {money(paymentPreview.currentAvailableCredit)}
+                                                {' → '}
+                                                <strong>{money(paymentPreview.nextAvailableCredit)}</strong>
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    )}
+
                     {type === 'expense' && budgetWarning && (
                         <div className={cn(
                             'flex gap-3 rounded-md border p-3',
@@ -563,6 +663,11 @@ export function TransactionFormDialog({
                                     <TrendingUp className="mr-2 h-4 w-4" />
                                     Add Income
                                 </>
+                            ) : type === 'payment' ? (
+                                <>
+                                    <CreditCard className="mr-2 h-4 w-4" />
+                                    Add Card Payment
+                                </>
                             ) : (
                                 <>
                                     <ArrowRightLeft className="mr-2 h-4 w-4" />
@@ -588,12 +693,20 @@ export function AddTransactionButton({
     categories: Category[];
     onSaved: () => void;
 }) {
-    const label = type === 'expense' ? 'Expense' : type === 'income' ? 'Income' : 'Transfer';
+    const label = type === 'expense'
+        ? 'Expense'
+        : type === 'income'
+            ? 'Income'
+            : type === 'payment'
+                ? 'Card Payment'
+                : 'Transfer';
     const icon = type === 'expense'
         ? <TrendingDown className="h-4 w-4" />
         : type === 'income'
             ? <TrendingUp className="h-4 w-4" />
-            : <ArrowRightLeft className="h-4 w-4" />;
+            : type === 'payment'
+                ? <CreditCard className="h-4 w-4" />
+                : <ArrowRightLeft className="h-4 w-4" />;
 
     return (
         <TransactionFormDialog

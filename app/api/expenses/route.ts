@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { applyExpenseBalanceChange, expenseBalanceError } from '@/lib/account-balances';
 
 export async function GET() {
     try {
@@ -29,36 +30,25 @@ export async function POST(request: NextRequest) {
             description
         };
 
-        // If accountId is provided, link the expense to the account and deduct from balance
-        if (accountId) {
-            expenseData.accountId = parseInt(accountId);
+        const parsedAccountId = accountId ? parseInt(accountId, 10) : null;
+        if (parsedAccountId) expenseData.accountId = parsedAccountId;
 
-            // Check if account has sufficient balance
-            const account = await prisma.account.findUnique({
-                where: { id: parseInt(accountId) }
-            });
-
-            if (!account) {
-                return NextResponse.json({ error: 'Account not found' }, { status: 404 });
+        const expense = await prisma.$transaction(async (tx) => {
+            if (parsedAccountId) {
+                await applyExpenseBalanceChange(tx, parsedAccountId, parseFloat(amount), 1);
             }
 
-            if (account.balance < parseFloat(amount)) {
-                return NextResponse.json({ error: 'Insufficient account balance' }, { status: 400 });
-            }
-
-            // Deduct from account balance
-            await prisma.account.update({
-                where: { id: parseInt(accountId) },
-                data: { balance: account.balance - parseFloat(amount) }
+            return tx.expense.create({
+                data: expenseData,
+                include: { account: true },
             });
-        }
-
-        const expense = await prisma.expense.create({
-            data: expenseData,
-            include: { account: true }
         });
         return NextResponse.json(expense, { status: 201 });
     } catch (error) {
+        const balanceError = expenseBalanceError(error);
+        if (balanceError) {
+            return NextResponse.json({ error: balanceError.error }, { status: balanceError.status });
+        }
         return NextResponse.json({ error: 'Failed to create expense' }, { status: 500 });
     }
 }

@@ -33,20 +33,21 @@ model ai_models {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model people {
-  first_name     String?             @default("")
-  last_name      String?
-  username       String?             @unique
-  password_hash  String?
-  created_at     DateTime            @default(now())
-  user_id        String              @id @db.Uuid
-  email          String?             @unique
-  avatar         String?
-  sessions       sessions[]
-  subscriptions  subscriptions[]
-  categories     Category[]
-  chatSessions   ChatSession[]
-  monthlyBudgets MonthlyBudget[]
-  aiSettings     AiProviderSetting[]
+  first_name            String?                 @default("")
+  last_name             String?
+  username              String?                 @unique
+  password_hash         String?
+  created_at            DateTime                @default(now())
+  user_id               String                  @id @db.Uuid
+  email                 String?                 @unique
+  avatar                String?
+  sessions              sessions[]
+  subscriptions         subscriptions[]
+  categories            Category[]
+  chatSessions          ChatSession[]
+  monthlyBudgets        MonthlyBudget[]
+  aiSettings            AiProviderSetting[]
+  transactionProvenance TransactionProvenance[]
 }
 
 model sessions {
@@ -108,15 +109,16 @@ model SubscriptionPayment {
 }
 
 model Expense {
-  id          Int      @id @default(autoincrement())
+  id          Int                    @id @default(autoincrement())
   amount      Float
   category    String
   date        String
   description String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
   accountId   Int?
-  account     Account? @relation(fields: [accountId], references: [id])
+  account     Account?               @relation(fields: [accountId], references: [id])
+  provenance  TransactionProvenance?
 }
 
 model Category {
@@ -146,36 +148,64 @@ model Account {
 }
 
 model Income {
-  id           Int      @id @default(autoincrement())
+  id           Int                    @id @default(autoincrement())
   amount       Float
   source       String
   date         String
   description  String
   notes        String?
   accountId    Int?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
   filingStatus String?
   state        String?
-  account      Account? @relation(fields: [accountId], references: [id])
+  account      Account?               @relation(fields: [accountId], references: [id])
+  provenance   TransactionProvenance?
 }
 
 model Transfer {
-  id             Int      @id @default(autoincrement())
+  id             Int                    @id @default(autoincrement())
   amount         Float
   date           String
   description    String
   fromAccountId  Int?
   toAccountId    Int?
-  affectsBalance Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  fromAccount    Account? @relation("TransferFromAccount", fields: [fromAccountId], references: [id])
-  toAccount      Account? @relation("TransferToAccount", fields: [toAccountId], references: [id])
+  affectsBalance Boolean                @default(false)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  fromAccount    Account?               @relation("TransferFromAccount", fields: [fromAccountId], references: [id])
+  toAccount      Account?               @relation("TransferToAccount", fields: [toAccountId], references: [id])
+  provenance     TransactionProvenance?
 
   @@index([date])
   @@index([fromAccountId])
   @@index([toAccountId])
+}
+
+model TransactionProvenance {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @db.Uuid
+  sourceType          String
+  source              String
+  externalId          String?
+  importHash          String?
+  currency            String    @default("USD")
+  originalDescription String
+  rawPayload          Json?
+  importedAt          DateTime  @default(now())
+  lastSyncedAt        DateTime?
+  expenseId           Int?      @unique
+  incomeId            Int?      @unique
+  transferId          Int?      @unique
+  user                people    @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+  expense             Expense?  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  income              Income?   @relation(fields: [incomeId], references: [id], onDelete: Cascade)
+  transfer            Transfer? @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, importHash])
+  @@unique([userId, source, externalId])
+  @@index([userId, importedAt])
+  @@index([sourceType, source])
 }
 
 model Debt {

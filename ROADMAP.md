@@ -43,9 +43,13 @@ Initial scope:
 
 ## Recommended Sequence
 
-1. Define the normalized transaction and provenance contract.
-2. Build the rules engine and test it against existing imported history.
-3. Add Plaid in sandbox mode.
-4. Add webhook processing and transaction review.
-5. Validate duplicate and transfer handling before enabling production sync.
+1. [x] Define the normalized transaction and provenance contract.
+2. [ ] Build the rules engine and test it against existing imported history.
+3. [ ] Add Plaid in sandbox mode.
+4. [ ] Add webhook processing and transaction review.
+5. [ ] Validate duplicate and transfer handling before enabling production sync.
 
+The normalized contract is now the boundary for Chase and Bank of America CSV
+imports. Provenance stores the source, original description, import hash,
+currency, raw source metadata, and owning user so future rules and bank syncs
+can share the same ingestion path.

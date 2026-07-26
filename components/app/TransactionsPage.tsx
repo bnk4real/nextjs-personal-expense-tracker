@@ -31,7 +31,7 @@ type IncomeRow = {
     account?: Account | null;
 };
 
-type TransactionType = 'expense' | 'income' | 'transfer';
+type TransactionType = 'expense' | 'income' | 'transfer' | 'payment';
 
 type UnifiedTransaction = {
     uid: string;
@@ -93,14 +93,20 @@ function normalizeTransactions(expenses: Expense[], incomes: IncomeRow[], transf
     const transferRows = transfers.map((transfer) => {
         const from = transfer.fromAccount?.name || 'No account';
         const to = transfer.toAccount?.name || 'No account';
+        const isCardPayment = transfer.fromAccount?.type !== 'Credit Card'
+            && transfer.toAccount?.type === 'Credit Card';
         return {
             uid: `transfer-${transfer.id}`,
             id: transfer.id,
-            type: 'transfer' as const,
+            type: isCardPayment ? 'payment' as const : 'transfer' as const,
             date: transfer.date,
             description: transfer.description,
             amount: transfer.amount,
-            categoryOrSource: transfer.affectsBalance ? 'Balance adjusted' : 'Historical',
+            categoryOrSource: isCardPayment
+                ? 'Credit card payment'
+                : transfer.affectsBalance
+                    ? 'Balance adjusted'
+                    : 'Historical',
             accountLabel: `${from} -> ${to}`,
             searchText: `${transfer.description} ${from} ${to}`.toLowerCase(),
             raw: transfer,
@@ -173,6 +179,7 @@ export default function TransactionsPage() {
         { value: 'expense', label: 'Expenses' },
         { value: 'income', label: 'Income' },
         { value: 'transfer', label: 'Transfers' },
+        { value: 'payment', label: 'Card Payments' },
     ];
 
     const filteredTransactions = transactions.filter((transaction) => {
@@ -192,19 +199,25 @@ export default function TransactionsPage() {
             if (transaction.type === 'expense') acc.expense += transaction.amount;
             if (transaction.type === 'income') acc.income += transaction.amount;
             if (transaction.type === 'transfer') acc.transfer += transaction.amount;
+            if (transaction.type === 'payment') acc.payment += transaction.amount;
             return acc;
         },
-        { expense: 0, income: 0, transfer: 0 }
+        { expense: 0, income: 0, transfer: 0, payment: 0 }
     );
     const netCashflow = totals.income - totals.expense;
 
     const handleDelete = async (transaction: UnifiedTransaction) => {
-        const label = transaction.type === 'transfer'
+        const label = transaction.type === 'transfer' || transaction.type === 'payment'
             ? 'Delete this transfer? Balance changes may be reversed depending on its settings.'
             : `Delete this ${transaction.type}?`;
         if (!confirm(label)) return;
 
-        const response = await fetch(`/api/${transaction.type === 'income' ? 'incomes' : `${transaction.type}s`}/${transaction.id}`, {
+        const endpoint = transaction.type === 'income'
+            ? 'incomes'
+            : transaction.type === 'payment'
+                ? 'transfers'
+                : `${transaction.type}s`;
+        const response = await fetch(`/api/${endpoint}/${transaction.id}`, {
             method: 'DELETE',
         });
 
@@ -232,16 +245,18 @@ export default function TransactionsPage() {
                     <>
                         <AddTransactionButton type="expense" accounts={accounts} categories={categories} onSaved={refreshData} />
                         <AddTransactionButton type="income" accounts={accounts} categories={categories} onSaved={refreshData} />
+                        <AddTransactionButton type="payment" accounts={accounts} categories={categories} onSaved={refreshData} />
                         <AddTransactionButton type="transfer" accounts={accounts} categories={categories} onSaved={refreshData} />
                     </>
                 )}
             />
 
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-5">
                 <MetricTile label="Expenses" value={money(totals.expense)} tone="expense" />
                 <MetricTile label="Income" value={money(totals.income)} tone="income" />
                 <MetricTile label="Net Cashflow" value={money(netCashflow)} tone={netCashflow >= 0 ? 'income' : 'expense'} />
                 <MetricTile label="Transfers" value={money(totals.transfer)} tone="transfer" />
+                <MetricTile label="Card Payments" value={money(totals.payment)} />
             </div>
 
             <Card className="rounded-md">

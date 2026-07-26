@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import jwt from 'jsonwebtoken';
 import { parseChaseStagingCsv } from '@/lib/importers/chase-staging-csv';
+import {
+    centsToDollars,
+    normalizeTransaction,
+    provenanceCreateData,
+} from '@/lib/transactions/contract';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -50,32 +55,6 @@ type ExistingMatch = {
     accountName: string | null;
 };
 
-type ExpenseImportRow = {
-    amount: number;
-    category: string;
-    date: string;
-    description: string;
-    importSource: string;
-    importHash: string;
-    accountName: string;
-    accountType: string;
-};
-
-type IncomeImportRow = {
-    amount: number;
-    source: string;
-    date: string;
-    description: string;
-    notes: string;
-    importSource: string;
-    importHash: string;
-    accountName: string;
-    accountType: string;
-};
-
-type ExpenseCreateInput = Omit<ExpenseImportRow, 'accountName' | 'accountType'>;
-type IncomeCreateInput = Omit<IncomeImportRow, 'accountName' | 'accountType'>;
-
 function verifyToken(token: string) {
     try {
         return jwt.verify(token, JWT_SECRET) as DecodedToken;
@@ -107,36 +86,6 @@ function canonicalAccountName(name: string) {
     };
 
     return aliases[name] || name;
-}
-
-function omitImportMetadata<T extends { importSource: string; importHash: string }>(row: T) {
-    const rest = { ...row } as Omit<T, 'importSource' | 'importHash'> & Partial<Pick<T, 'importSource' | 'importHash'>>;
-    delete rest.importSource;
-    delete rest.importHash;
-    return rest;
-}
-
-function toExpenseCreateInput(row: ExpenseImportRow): ExpenseCreateInput {
-    return {
-        amount: row.amount,
-        category: row.category,
-        date: row.date,
-        description: row.description,
-        importSource: row.importSource,
-        importHash: row.importHash,
-    };
-}
-
-function toIncomeCreateInput(row: IncomeImportRow): IncomeCreateInput {
-    return {
-        amount: row.amount,
-        source: row.source,
-        date: row.date,
-        description: row.description,
-        notes: row.notes,
-        importSource: row.importSource,
-        importHash: row.importHash,
-    };
 }
 
 function normalizeForMatch(value: string) {
@@ -273,7 +222,11 @@ async function findExistingMatches(transactions: ChaseTransaction[]) {
     return matchesByKey;
 }
 
-function buildPreviewRows(transactions: ChaseTransaction[], matchesByKey: Map<string, ExistingMatch[]>) {
+function buildPreviewRows(
+    transactions: ChaseTransaction[],
+    matchesByKey: Map<string, ExistingMatch[]>,
+    importedHashes: Set<string>
+) {
     return transactions.map((transaction) => {
         const type = transaction.kind;
         const matches = matchesByKey.get(matchKey(type, transaction.date, transaction.displayAmount, transaction.accountName)) || [];
@@ -281,7 +234,7 @@ function buildPreviewRows(transactions: ChaseTransaction[], matchesByKey: Map<st
         const hasExactDescriptionMatch = matches.some((match) =>
             normalizeForMatch(match.description) === normalizedImportDescription
         );
-        const duplicateStatus: DuplicateStatus = hasExactDescriptionMatch
+        const duplicateStatus: DuplicateStatus = importedHashes.has(transaction.importHash) || hasExactDescriptionMatch
             ? 'exact_duplicate'
             : matches.length > 0
                 ? 'possible_duplicate'
@@ -366,8 +319,22 @@ export async function POST(request: NextRequest) {
         const uniqueTransactions = [...new Map(
             allTransactions.map((transaction) => [transaction.importHash, transaction])
         ).values()];
-        const matchesByKey = await findExistingMatches(uniqueTransactions);
-        const allPreviewRows = buildPreviewRows(uniqueTransactions, matchesByKey);
+        const [matchesByKey, importedProvenance] = await Promise.all([
+            findExistingMatches(uniqueTransactions),
+            prisma.transactionProvenance.findMany({
+                where: {
+                    userId: decoded.user_id,
+                    importHash: { in: uniqueTransactions.map((transaction) => transaction.importHash) },
+                },
+                select: { importHash: true },
+            }),
+        ]);
+        const importedHashes = new Set(
+            importedProvenance
+                .map((item) => item.importHash)
+                .filter((hash): hash is string => Boolean(hash))
+        );
+        const allPreviewRows = buildPreviewRows(uniqueTransactions, matchesByKey, importedHashes);
         const importHashByStatus = new Map(allPreviewRows.map((row) => [row.id, row.duplicateStatus]));
         const defaultSelectedImportHashes = new Set(
             allPreviewRows
@@ -376,7 +343,9 @@ export async function POST(request: NextRequest) {
         );
         const activeSelectedImportHashes = commit ? selectedImportHashes : defaultSelectedImportHashes;
         const transactionsToImport = uniqueTransactions.filter((transaction) =>
-            activeSelectedImportHashes?.has(transaction.importHash) && !transaction.isTransferLike
+            activeSelectedImportHashes?.has(transaction.importHash) &&
+            !transaction.isTransferLike &&
+            !importedHashes.has(transaction.importHash)
         );
 
         if (commit && (!selectedImportHashes || selectedImportHashes.size === 0)) {
@@ -384,35 +353,35 @@ export async function POST(request: NextRequest) {
         }
 
         if (commit && transactionsToImport.length === 0) {
-            return NextResponse.json({ error: 'Selected rows are transfers or review-only rows, so nothing can be imported.' }, { status: 400 });
+            return NextResponse.json({ error: 'Selected rows are transfers, review-only, or already imported, so nothing can be imported.' }, { status: 400 });
         }
 
-        const expenses: ExpenseImportRow[] = transactionsToImport
-            .filter((transaction) => transaction.kind === 'expense')
-            .map((transaction) => ({
+        const normalizedTransactions = transactionsToImport.map((transaction) => ({
+            sourceRow: transaction,
+            normalized: normalizeTransaction({
+                kind: transaction.kind,
                 amount: transaction.displayAmount,
-                category: transaction.category || 'Uncategorized',
                 date: transaction.date,
                 description: transaction.description,
-                importSource: transaction.importSource,
-                importHash: transaction.importHash,
-                accountName: transaction.accountName,
-                accountType: transaction.accountType,
-            }));
-
-        const incomes: IncomeImportRow[] = transactionsToImport
-            .filter((transaction) => transaction.kind === 'income')
-            .map((transaction) => ({
-                amount: transaction.displayAmount,
-                source: transaction.source || 'Credit/Payment',
-                date: transaction.date,
-                description: transaction.description,
-                notes: `Imported from ${transaction.fileName}`,
-                importSource: transaction.importSource,
-                importHash: transaction.importHash,
-                accountName: transaction.accountName,
-                accountType: transaction.accountType,
-            }));
+                originalDescription: transaction.description,
+                category: transaction.category,
+                incomeSource: transaction.source,
+                isTransferLike: transaction.isTransferLike,
+                provenance: {
+                    sourceType: 'file_import',
+                    source: transaction.importSource,
+                    importHash: transaction.importHash,
+                    rawPayload: {
+                        fileName: transaction.fileName,
+                        rowNumber: transaction.rowNumber,
+                        accountLast4: transaction.accountLast4,
+                        signedAmount: transaction.amount,
+                    },
+                },
+            }),
+        }));
+        const expenses = normalizedTransactions.filter(({ normalized }) => normalized.kind === 'expense');
+        const incomes = normalizedTransactions.filter(({ normalized }) => normalized.kind === 'income');
 
         const summary = {
             files: files.length,
@@ -442,44 +411,64 @@ export async function POST(request: NextRequest) {
         }
 
         const allRowsForAccounts = [
-            ...expenses.map((row) => ({ accountName: row.accountName, accountType: row.accountType })),
-            ...incomes.map((row) => ({ accountName: row.accountName, accountType: row.accountType })),
+            ...normalizedTransactions.map(({ sourceRow }) => ({
+                accountName: sourceRow.accountName,
+                accountType: sourceRow.accountType,
+            })),
         ];
         const accountIdsByName = await getOrCreateAccounts(allRowsForAccounts);
 
-        const categories = [...new Set(expenses.map((row) => row.category))];
+        const categories = [...new Set(expenses.map(({ normalized }) => normalized.category || 'Uncategorized'))];
         for (const category of categories) {
             await ensureCategory(category);
         }
 
-        const [expenseResult, incomeResult] = await prisma.$transaction([
-            prisma.expense.createMany({
-                data: expenses.map((row) => {
-                    const rest = toExpenseCreateInput(row);
-                    return {
-                        ...omitImportMetadata(rest),
-                        accountId: accountIdsByName.get(row.accountName) || null,
-                    };
-                }),
-            }),
-            prisma.income.createMany({
-                data: incomes.map((row) => {
-                    const rest = toIncomeCreateInput(row);
-                    return {
-                        ...omitImportMetadata(rest),
-                        accountId: accountIdsByName.get(row.accountName) || null,
-                    };
-                }),
-            }),
-        ]);
+        const result = await prisma.$transaction(async (tx) => {
+            let createdExpenses = 0;
+            let createdIncomes = 0;
+
+            for (const { sourceRow, normalized } of normalizedTransactions) {
+                const accountId = accountIdsByName.get(sourceRow.accountName) || null;
+                const provenance = { create: provenanceCreateData(decoded.user_id, normalized) };
+
+                if (normalized.kind === 'expense') {
+                    await tx.expense.create({
+                        data: {
+                            amount: centsToDollars(normalized.amountCents),
+                            category: normalized.category || 'Uncategorized',
+                            date: normalized.date,
+                            description: normalized.description,
+                            accountId,
+                            provenance,
+                        },
+                    });
+                    createdExpenses++;
+                } else if (normalized.kind === 'income') {
+                    await tx.income.create({
+                        data: {
+                            amount: centsToDollars(normalized.amountCents),
+                            source: normalized.incomeSource || 'Credit/Payment',
+                            date: normalized.date,
+                            description: normalized.description,
+                            notes: `Imported from ${sourceRow.fileName}`,
+                            accountId,
+                            provenance,
+                        },
+                    });
+                    createdIncomes++;
+                }
+            }
+
+            return { createdExpenses, createdIncomes };
+        });
 
         return NextResponse.json({
             summary,
             rows: previewRows,
             result: {
                 accountId: [...accountIdsByName.values()][0] || 0,
-                createdExpenses: expenseResult.count,
-                createdIncomes: incomeResult.count,
+                createdExpenses: result.createdExpenses,
+                createdIncomes: result.createdIncomes,
                 accountBalanceSynced: false,
             },
         });

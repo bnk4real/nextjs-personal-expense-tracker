@@ -18,7 +18,7 @@ export interface Account {
     name: string;
     type: string;
     balance: number;
-    creditLimit?: number;
+    creditLimit?: number | null;
 }
 
 export interface Transfer {

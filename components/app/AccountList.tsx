@@ -15,6 +15,7 @@ import { Progress } from '@/components/ui/progress';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { AddTransactionButton } from '@/components/app/TransactionFormDialog';
 
 const ACCOUNT_TYPES = [
     'Cash',
@@ -304,29 +305,39 @@ export default function AccountList() {
                 title="Accounts"
                 description="Audit balances, credit cards, and duplicate accounts before transactions get messy."
                 actions={(
-                    <Dialog open={addModalOpen} onOpenChange={(open) => {
-                        setAddModalOpen(open);
-                        if (!open) resetForm();
-                    }}>
-                        <DialogTrigger asChild>
-                            <Button>
-                                <Plus className="h-4 w-4" />
-                                Add Account
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent className="sm:max-w-lg">
-                            <DialogHeader>
-                                <DialogTitle>Add Account</DialogTitle>
-                            </DialogHeader>
-                            <AccountForm
-                                formData={formData}
-                                setFormData={setFormData}
-                                onSubmit={handleAddSubmit}
-                                onCancel={() => setAddModalOpen(false)}
-                                submitLabel="Add Account"
+                    <>
+                        {accounts.some((account) => account.type === 'Credit Card') && (
+                            <AddTransactionButton
+                                type="payment"
+                                accounts={accounts}
+                                categories={[]}
+                                onSaved={fetchAccounts}
                             />
-                        </DialogContent>
-                    </Dialog>
+                        )}
+                        <Dialog open={addModalOpen} onOpenChange={(open) => {
+                            setAddModalOpen(open);
+                            if (!open) resetForm();
+                        }}>
+                            <DialogTrigger asChild>
+                                <Button>
+                                    <Plus className="h-4 w-4" />
+                                    Add Account
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-lg">
+                                <DialogHeader>
+                                    <DialogTitle>Add Account</DialogTitle>
+                                </DialogHeader>
+                                <AccountForm
+                                    formData={formData}
+                                    setFormData={setFormData}
+                                    onSubmit={handleAddSubmit}
+                                    onCancel={() => setAddModalOpen(false)}
+                                    submitLabel="Add Account"
+                                />
+                            </DialogContent>
+                        </Dialog>
+                    </>
                 )}
             />
 
