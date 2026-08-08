@@ -63,25 +63,26 @@ model sessions {
 }
 
 model subscriptions {
-  id                String                @id @default(uuid()) @db.Uuid
-  user_id           String                @db.Uuid
-  name              String
-  provider          String?
-  price_cents       Int
-  currency          String                @default("USD")
-  billing_cycle     String                @default("monthly")
-  start_date        DateTime              @default(now())
-  next_payment_date DateTime?
-  status            String                @default("active")
-  end_date          DateTime?
-  website_url       String?
-  notes             String?
-  created_at        DateTime              @default(now())
-  updated_at        DateTime              @updatedAt
-  people            people                @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-  categoryId        Int?
-  category          Category?             @relation(fields: [categoryId], references: [id])
-  payments          SubscriptionPayment[]
+  id                       String                @id @default(uuid()) @db.Uuid
+  user_id                  String                @db.Uuid
+  name                     String
+  provider                 String?
+  price_cents              Int
+  currency                 String                @default("USD")
+  billing_cycle            String                @default("monthly")
+  company_coverage_percent Int                   @default(0)
+  start_date               DateTime              @default(now())
+  next_payment_date        DateTime?
+  status                   String                @default("active")
+  end_date                 DateTime?
+  website_url              String?
+  notes                    String?
+  created_at               DateTime              @default(now())
+  updated_at               DateTime              @updatedAt
+  people                   people                @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  categoryId               Int?
+  category                 Category?             @relation(fields: [categoryId], references: [id])
+  payments                 SubscriptionPayment[]
 
   @@index([next_payment_date])
   @@index([user_id])
@@ -102,6 +103,7 @@ model SubscriptionPayment {
 
   subscription subscriptions @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
+  @@unique([subscriptionId, dueDate])
   @@index([subscriptionId])
   @@index([paymentDate])
   @@index([dueDate])

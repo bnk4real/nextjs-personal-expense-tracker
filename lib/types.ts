@@ -43,7 +43,10 @@ export interface Subscription {
     price_cents: number;
     currency: string;
     billing_cycle: string;
+    company_coverage_percent: number;
+    start_date: string;
     next_payment_date?: string;
+    status: string;
     website_url?: string;
     notes?: string;
     created_at: string;

@@ -56,6 +56,12 @@ const primaryItems: NavigationItem[] = [
         icon: <Gauge className="h-4 w-4" />,
     },
     {
+        href: '/subscriptions',
+        label: 'Subscriptions',
+        helper: 'Recurring costs',
+        icon: <Repeat className="h-4 w-4" />,
+    },
+    {
         href: '/transactions',
         label: 'Ledger',
         helper: 'All money movement',
@@ -94,12 +100,6 @@ const primaryItems: NavigationItem[] = [
 ];
 
 const toolItems: NavigationItem[] = [
-    {
-        href: '/subscriptions',
-        label: 'Subscriptions',
-        helper: 'Recurring costs',
-        icon: <Repeat className="h-4 w-4" />,
-    },
     {
         href: '/transfers',
         label: 'Transfers',

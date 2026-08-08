@@ -1,5 +1,10 @@
 # SubTracker Subscription Payment Migration Guide
 
+> Legacy backfill reference. The current subscription flow automatically keeps
+> one real pending occurrence scheduled and creates the next occurrence when a
+> payment is marked paid. The migration action is no longer shown in the UI
+> because it assumes every historical charge was paid on time.
+
 ## Overview
 This guide helps you migrate existing subscription payment history into the new recurring payment system.
 

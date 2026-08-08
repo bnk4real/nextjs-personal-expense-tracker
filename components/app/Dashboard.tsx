@@ -7,8 +7,8 @@ import {
     ArrowRightLeft,
     CalendarDays,
     Clock3,
-    Landmark,
     ListFilter,
+    Repeat,
     TrendingDown,
     TrendingUp,
     WalletCards,
@@ -17,6 +17,10 @@ import { toast } from 'sonner';
 import { Account, Category, Expense, Subscription, Transfer } from '@/lib/types';
 import Calendar from '@/lib/Calendar';
 import { doesDateStringMatchUTC, formatDateForDisplay, parseUTCDate } from '@/lib/format_date';
+import {
+    companySubscriptionContributionCents,
+    personalSubscriptionCostCents,
+} from '@/lib/recurring-payments';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -323,11 +327,7 @@ export default function Dashboard() {
 
     const upcomingPayments = subscriptions
         .filter((subscription) => {
-            if (!subscription.next_payment_date) return false;
-            const paymentDate = parseUTCDate(subscription.next_payment_date);
-            const thirtyDaysFromNow = new Date();
-            thirtyDaysFromNow.setDate(today.getDate() + 30);
-            return paymentDate >= today && paymentDate <= thirtyDaysFromNow;
+            return subscription.status === 'active' && Boolean(subscription.next_payment_date);
         })
         .sort((a, b) => parseUTCDate(a.next_payment_date!).getTime() - parseUTCDate(b.next_payment_date!).getTime())
         .slice(0, 4);
@@ -556,9 +556,9 @@ export default function Dashboard() {
                         )}
                     </Panel>
 
-                    <Panel title="Upcoming" icon={<Landmark className="h-4 w-4 text-sky-600" />}>
+                    <Panel title="Recurring Payments" icon={<Repeat className="h-4 w-4 text-sky-600" />}>
                         {upcomingPayments.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">Nothing due in the next 30 days.</p>
+                            <p className="text-sm text-muted-foreground">No active recurring payments.</p>
                         ) : (
                             <div className="space-y-3">
                                 {upcomingPayments.map((subscription) => (
@@ -569,14 +569,45 @@ export default function Dashboard() {
                                         className="flex w-full items-center justify-between gap-3 rounded-md p-2 text-left text-sm transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                     >
                                         <div className="min-w-0">
-                                            <p className="truncate font-medium">{subscription.name}</p>
-                                            <p className="text-xs text-muted-foreground">
-                                                {subscription.next_payment_date ? formatDateForDisplay(subscription.next_payment_date) : 'No date'}
+                                            <div className="flex min-w-0 items-center gap-2">
+                                                <p className="truncate font-medium">{subscription.name}</p>
+                                                <Badge variant="outline" className="shrink-0 capitalize">
+                                                    {subscription.billing_cycle}
+                                                </Badge>
+                                                {subscription.company_coverage_percent > 0 && (
+                                                    <Badge variant="outline" className="shrink-0 border-sky-200 bg-sky-50 text-sky-700">
+                                                        Company {subscription.company_coverage_percent}%
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                Next payment {subscription.next_payment_date ? formatDateForDisplay(subscription.next_payment_date) : 'not scheduled'}
                                             </p>
                                         </div>
-                                        <span className="shrink-0 font-semibold tabular-nums text-red-600">{money(subscription.price_cents / 100)}</span>
+                                        <div className="shrink-0 text-right">
+                                            <p className={cn(
+                                                'font-semibold tabular-nums',
+                                                subscription.company_coverage_percent > 0 ? 'text-sky-700' : 'text-red-600'
+                                            )}>
+                                                {money(personalSubscriptionCostCents(
+                                                    subscription.price_cents,
+                                                    subscription.company_coverage_percent
+                                                ) / 100)}
+                                            </p>
+                                            {subscription.company_coverage_percent > 0 && (
+                                                <p className="text-xs text-muted-foreground">
+                                                    of {money(subscription.price_cents / 100)}
+                                                </p>
+                                            )}
+                                        </div>
                                     </button>
                                 ))}
+                                <Button variant="outline" size="sm" className="w-full" asChild>
+                                    <Link href="/subscriptions">
+                                        Open Subscriptions
+                                        <ArrowRight className="h-4 w-4" />
+                                    </Link>
+                                </Button>
                             </div>
                         )}
                     </Panel>
@@ -620,9 +651,17 @@ export default function Dashboard() {
                                                     >
                                                         <div className="min-w-0">
                                                             <p className="truncate font-medium">{subscription.name}</p>
-                                                            <p className="text-xs text-muted-foreground">{subscription.provider || 'Subscription'}</p>
+                                                            <p className="text-xs capitalize text-muted-foreground">Recurring · {subscription.billing_cycle}</p>
                                                         </div>
-                                                        <span className="font-semibold text-sky-600">{money(subscription.price_cents / 100)}</span>
+                                                        <span className={cn(
+                                                            'font-semibold',
+                                                            subscription.company_coverage_percent > 0 ? 'text-sky-700' : 'text-red-600'
+                                                        )}>
+                                                            {money(personalSubscriptionCostCents(
+                                                                subscription.price_cents,
+                                                                subscription.company_coverage_percent
+                                                            ) / 100)}
+                                                        </span>
                                                     </button>
                                                 ))}
                                             </>
@@ -746,14 +785,16 @@ export default function Dashboard() {
                     {selectedItem?.kind === 'subscription' && (
                         <div className="space-y-5">
                             <div className="rounded-md border bg-zinc-50 p-4">
-                                <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Upcoming Payment</p>
+                                <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Recurring Payment</p>
                                 <h3 className="mt-2 break-words text-xl font-semibold text-zinc-950">{selectedItem.subscription.name}</h3>
                                 <p className="mt-1 text-sm text-muted-foreground">{selectedItem.subscription.provider || 'Subscription'}</p>
                             </div>
                             <div className="grid gap-3 text-sm sm:grid-cols-2">
                                 <div className="rounded-md border p-3">
-                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Amount</p>
-                                    <p className="mt-1 text-lg font-semibold tabular-nums text-red-600">{money(selectedItem.subscription.price_cents / 100)}</p>
+                                    <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Full Charge</p>
+                                    <p className="mt-1 text-lg font-semibold tabular-nums">
+                                        {money(selectedItem.subscription.price_cents / 100)}
+                                    </p>
                                 </div>
                                 <div className="rounded-md border p-3">
                                     <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Next Payment</p>
@@ -761,6 +802,30 @@ export default function Dashboard() {
                                         {selectedItem.subscription.next_payment_date ? formatDateForDisplay(selectedItem.subscription.next_payment_date) : 'No date'}
                                     </p>
                                 </div>
+                                {selectedItem.subscription.company_coverage_percent > 0 && (
+                                    <>
+                                        <div className="rounded-md border border-sky-200 bg-sky-50/50 p-3">
+                                            <p className="text-xs font-medium uppercase tracking-normal text-sky-700">Company Covers</p>
+                                            <p className="mt-1 text-lg font-semibold tabular-nums text-sky-700">
+                                                {money(companySubscriptionContributionCents(
+                                                    selectedItem.subscription.price_cents,
+                                                    selectedItem.subscription.company_coverage_percent
+                                                ) / 100)}
+                                            </p>
+                                            <p className="mt-1 text-xs text-sky-700">{selectedItem.subscription.company_coverage_percent}% of full charge</p>
+                                        </div>
+                                        <div className="rounded-md border p-3">
+                                            <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">You Pay</p>
+                                            <p className="mt-1 text-lg font-semibold tabular-nums text-red-600">
+                                                {money(personalSubscriptionCostCents(
+                                                    selectedItem.subscription.price_cents,
+                                                    selectedItem.subscription.company_coverage_percent
+                                                ) / 100)}
+                                            </p>
+                                            <p className="mt-1 text-xs text-muted-foreground">Counted in personal spend</p>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                             <div className="rounded-md border p-3 text-sm">
                                 <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Billing Cycle</p>

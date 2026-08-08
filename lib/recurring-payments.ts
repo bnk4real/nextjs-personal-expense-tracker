@@ -17,6 +17,20 @@ export interface RecurringPaymentOptions {
   currency: string;
 }
 
+function addUtcMonths(fromDate: Date, months: number): Date {
+  const date = new Date(fromDate.getTime());
+  const originalDay = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  const lastDayOfTargetMonth = new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    0
+  )).getUTCDate();
+  date.setUTCDate(Math.min(originalDay, lastDayOfTargetMonth));
+  return date;
+}
+
 /**
  * Calculate the next payment date based on billing cycle
  */
@@ -34,19 +48,59 @@ export function calculateNextPaymentDate(
       date.setUTCDate(date.getUTCDate() + 7);
       break;
     case 'monthly':
-      date.setUTCMonth(date.getUTCMonth() + 1);
-      break;
+      return addUtcMonths(date, 1);
     case 'quarterly':
-      date.setUTCMonth(date.getUTCMonth() + 3);
-      break;
+      return addUtcMonths(date, 3);
     case 'yearly':
-      date.setUTCFullYear(date.getUTCFullYear() + 1);
-      break;
+      return addUtcMonths(date, 12);
     default:
-      date.setUTCMonth(date.getUTCMonth() + 1);
+      return addUtcMonths(date, 1);
   }
 
   return date;
+}
+
+export function firstPaymentOnOrAfter(
+  startDate: Date,
+  billingCycle: string,
+  targetDate: Date,
+  afterDate?: Date
+): Date {
+  const target = new Date(targetDate.getTime());
+  target.setUTCHours(0, 0, 0, 0);
+  const after = afterDate ? new Date(afterDate.getTime()) : null;
+  let candidate = scheduledPaymentDate(startDate, billingCycle, 1);
+
+  for (let occurrence = 2; occurrence <= 5000; occurrence += 1) {
+    if (candidate >= target && (!after || candidate > after)) return candidate;
+    candidate = scheduledPaymentDate(startDate, billingCycle, occurrence);
+  }
+
+  return candidate;
+}
+
+function scheduledPaymentDate(
+  startDate: Date,
+  billingCycle: string,
+  occurrence: number
+): Date {
+  const date = new Date(startDate.getTime());
+
+  switch (billingCycle) {
+    case 'daily':
+      date.setUTCDate(date.getUTCDate() + occurrence);
+      return date;
+    case 'weekly':
+      date.setUTCDate(date.getUTCDate() + (7 * occurrence));
+      return date;
+    case 'quarterly':
+      return addUtcMonths(date, 3 * occurrence);
+    case 'yearly':
+      return addUtcMonths(date, 12 * occurrence);
+    case 'monthly':
+    default:
+      return addUtcMonths(date, occurrence);
+  }
 }
 
 /**
@@ -57,10 +111,9 @@ export function generatePaymentSchedule(
   maxPayments: number = 12
 ): PaymentSchedule[] {
   const schedule: PaymentSchedule[] = [];
-  let currentDate = new Date(options.startDate.getTime());
 
-  for (let i = 0; i < maxPayments; i++) {
-    currentDate = calculateNextPaymentDate(currentDate, options.billingCycle);
+  for (let i = 1; i <= maxPayments; i++) {
+    const currentDate = scheduledPaymentDate(options.startDate, options.billingCycle, i);
     
     // Stop if we have an end date and we've passed it
     if (options.endDate && currentDate > options.endDate) {
@@ -133,25 +186,49 @@ export function estimateMonthlyCost(subscriptions: Array<{
   price_cents: number;
   billing_cycle: string;
   status: string;
+  company_coverage_percent?: number;
 }>): number {
   return subscriptions.reduce((total, sub) => {
     if (sub.status !== 'active') return total;
+    const personalPriceCents = personalSubscriptionCostCents(
+      sub.price_cents,
+      sub.company_coverage_percent || 0
+    );
     
     switch (sub.billing_cycle) {
       case 'monthly':
-        return total + (sub.price_cents / 100);
+        return total + (personalPriceCents / 100);
       case 'yearly':
-        return total + (sub.price_cents / 100) / 12;
+        return total + (personalPriceCents / 100) / 12;
       case 'quarterly':
-        return total + (sub.price_cents / 100) / 3;
+        return total + (personalPriceCents / 100) / 3;
       case 'weekly':
-        return total + (sub.price_cents / 100) * 4.33; // Average weeks per month
+        return total + (personalPriceCents / 100) * 4.33; // Average weeks per month
       case 'daily':
-        return total + (sub.price_cents / 100) * 30;
+        return total + (personalPriceCents / 100) * 30;
       default:
         return total;
     }
   }, 0);
+}
+
+export function normalizeCoveragePercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(Math.max(Math.round(value), 0), 100);
+}
+
+export function companySubscriptionContributionCents(
+  priceCents: number,
+  coveragePercent: number
+): number {
+  return Math.round(priceCents * normalizeCoveragePercent(coveragePercent) / 100);
+}
+
+export function personalSubscriptionCostCents(
+  priceCents: number,
+  coveragePercent: number
+): number {
+  return priceCents - companySubscriptionContributionCents(priceCents, coveragePercent);
 }
 
 /**

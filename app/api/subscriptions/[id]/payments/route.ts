@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import jwt from 'jsonwebtoken';
 import { generatePaymentSchedule, getOverduePayments, getUpcomingPayments, PaymentSchedule } from '@/lib/recurring-payments';
+import { ensureNextSubscriptionPayment } from '@/lib/subscription-schedule';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -48,6 +49,8 @@ export async function GET(
         if (!subscription) {
             return NextResponse.json({ error: 'Subscription not found' }, { status: 404 });
         }
+
+        await ensureNextSubscriptionPayment(subscription);
 
         // Get existing payments
         const payments = await prisma.subscriptionPayment.findMany({
@@ -150,6 +153,7 @@ export async function POST(
                 status
             }
         });
+        await ensureNextSubscriptionPayment(subscription);
 
         return NextResponse.json(payment, { status: 201 });
     } catch (error) {

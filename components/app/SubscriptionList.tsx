@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-    AlertCircle,
     Calendar,
     CheckCircle,
     CreditCard,
@@ -10,7 +9,6 @@ import {
     Filter,
     Pencil,
     Plus,
-    RefreshCw,
     Trash2,
 } from 'lucide-react';
 import { EmptyState, MetricTile, PageHeader } from '@/components/app/WorkspaceUI';
@@ -25,7 +23,14 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatDateForDisplay } from '@/lib/format_date';
-import { calculateNextPaymentDate, estimateMonthlyCost, formatPaymentAmount } from '@/lib/recurring-payments';
+import {
+    calculateNextPaymentDate,
+    companySubscriptionContributionCents,
+    estimateMonthlyCost,
+    formatPaymentAmount,
+    normalizeCoveragePercent,
+    personalSubscriptionCostCents,
+} from '@/lib/recurring-payments';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -36,6 +41,7 @@ interface Subscription {
     price_cents: number;
     currency: string;
     billing_cycle: string;
+    company_coverage_percent: number;
     start_date: string;
     next_payment_date?: string;
     status: string;
@@ -99,6 +105,7 @@ const blankForm = {
     price: '',
     currency: 'USD',
     billing_cycle: 'monthly',
+    company_coverage_percent: '0',
     start_date: '',
     status: 'active',
     website_url: '',
@@ -181,6 +188,55 @@ function SubscriptionForm({
                         onChange={(event) => setFormData({ ...formData, provider: event.target.value })}
                         placeholder="Company name"
                     />
+                </div>
+            </div>
+
+            <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+                <div>
+                    <p className="text-sm font-medium">Payment coverage</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                        The schedule uses the full charge; personal totals use only your share.
+                    </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {[
+                        { label: 'I pay', value: '0' },
+                        { label: 'Split 50/50', value: '50' },
+                        { label: 'Company pays all', value: '100' },
+                    ].map((option) => (
+                        <Button
+                            key={option.value}
+                            type="button"
+                            size="sm"
+                            variant={formData.company_coverage_percent === option.value ? 'default' : 'outline'}
+                            onClick={() => setFormData({ ...formData, company_coverage_percent: option.value })}
+                        >
+                            {option.label}
+                        </Button>
+                    ))}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[180px_1fr] sm:items-end">
+                    <div className="space-y-2">
+                        <Label htmlFor="company-coverage">Company coverage (%)</Label>
+                        <Input
+                            id="company-coverage"
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={formData.company_coverage_percent}
+                            onChange={(event) => setFormData({ ...formData, company_coverage_percent: event.target.value })}
+                        />
+                    </div>
+                    <p className="pb-2 text-sm text-muted-foreground">
+                        You pay {formatPaymentAmount(
+                            personalSubscriptionCostCents(
+                                centsFromPrice(formData.price),
+                                normalizeCoveragePercent(Number(formData.company_coverage_percent))
+                            ),
+                            formData.currency
+                        )} of {formatPaymentAmount(centsFromPrice(formData.price), formData.currency)}
+                    </p>
                 </div>
             </div>
 
@@ -340,12 +396,6 @@ export default function SubscriptionList() {
         const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
         return dueDate >= now && dueDate <= nextWeek;
     });
-    const shouldShowMigrationAlert = subscriptions.some((subscription) => {
-        const startDate = new Date(subscription.start_date);
-        const ageInDays = Math.floor((Date.now() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-        return ageInDays > 30;
-    });
-
     const resetForm = () => {
         setFormData(blankForm);
         setEditingSubscription(null);
@@ -358,6 +408,7 @@ export default function SubscriptionList() {
             price: priceFromCents(subscription.price_cents),
             currency: subscription.currency,
             billing_cycle: subscription.billing_cycle,
+            company_coverage_percent: subscription.company_coverage_percent.toString(),
             start_date: dateInputValue(subscription.start_date),
             status: subscription.status,
             website_url: subscription.website_url || '',
@@ -378,6 +429,7 @@ export default function SubscriptionList() {
             price_cents: centsFromPrice(formData.price),
             currency: formData.currency,
             billing_cycle: formData.billing_cycle,
+            company_coverage_percent: normalizeCoveragePercent(Number(formData.company_coverage_percent)),
             start_date: startDate.toISOString(),
             next_payment_date: nextPaymentDate.toISOString(),
             status: formData.status || 'active',
@@ -476,39 +528,6 @@ export default function SubscriptionList() {
         }
     };
 
-    const generateFuturePayments = async () => {
-        const response = await fetch('/api/subscriptions/payments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ monthsAhead: 12 }),
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            toast.success(`Generated ${data.payments?.length || 0} future payments`);
-            if (editingSubscription) fetchSubscriptionPayments(editingSubscription.id);
-        } else {
-            toast.error('Failed to generate payments');
-        }
-    };
-
-    const migrateExistingPayments = async () => {
-        const response = await fetch('/api/admin/migrate-payments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            toast.success(`Migration completed: ${data.summary.totalPaymentsCreated} payments`);
-            fetchSubscriptions();
-            if (editingSubscription) fetchSubscriptionPayments(editingSubscription.id);
-        } else {
-            const errorData = await response.json();
-            toast.error(`Migration failed: ${errorData.error}`);
-        }
-    };
-
     const toggleCategory = (categoryId: number, checked: boolean) => {
         setSelectedCategoryIds((current) => {
             const next = new Set(current);
@@ -595,20 +614,6 @@ export default function SubscriptionList() {
                 )}
             />
 
-            {shouldShowMigrationAlert && (
-                <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <div className="flex-1 text-sm">
-                        <p className="font-medium">Older subscriptions may be missing payment history.</p>
-                        <p className="mt-1 text-amber-800">Run migration if you want generated payment records based on start dates and billing cycles.</p>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={migrateExistingPayments}>
-                        <RefreshCw className="h-4 w-4" />
-                        Migrate
-                    </Button>
-                </div>
-            )}
-
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <MetricTile label="Visible Subscriptions" value={filteredSubscriptions.length.toString()} />
                 <MetricTile label="Active" value={activeSubscriptions.length.toString()} tone="income" />
@@ -629,7 +634,10 @@ export default function SubscriptionList() {
                             <div key={subscription.id} className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
                                 <span className="font-medium">{subscription.name}</span>
                                 <span className="text-muted-foreground">
-                                    {formatPaymentAmount(subscription.price_cents, subscription.currency)} on {formatDateForDisplay(subscription.next_payment_date || '')}
+                                    {subscription.company_coverage_percent > 0
+                                        ? `You pay ${formatPaymentAmount(personalSubscriptionCostCents(subscription.price_cents, subscription.company_coverage_percent), subscription.currency)}`
+                                        : formatPaymentAmount(subscription.price_cents, subscription.currency)
+                                    } on {formatDateForDisplay(subscription.next_payment_date || '')}
                                 </span>
                             </div>
                         ))}
@@ -669,6 +677,11 @@ export default function SubscriptionList() {
                                                 <div className="min-w-0">
                                                     <div className="flex min-w-0 items-center gap-2">
                                                         <p className="truncate font-medium">{subscription.name}</p>
+                                                        {subscription.company_coverage_percent > 0 && (
+                                                            <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">
+                                                                Company {subscription.company_coverage_percent}%
+                                                            </Badge>
+                                                        )}
                                                         {subscription.website_url && (
                                                             <a
                                                                 href={subscription.website_url}
@@ -691,6 +704,17 @@ export default function SubscriptionList() {
                                             </td>
                                             <td className="whitespace-nowrap px-3 py-3 text-right align-top font-semibold tabular-nums">
                                                 {formatPaymentAmount(subscription.price_cents, subscription.currency)}
+                                                {subscription.company_coverage_percent > 0 && (
+                                                    <span className="mt-1 block text-xs font-normal text-sky-700">
+                                                        Company {formatPaymentAmount(
+                                                            companySubscriptionContributionCents(subscription.price_cents, subscription.company_coverage_percent),
+                                                            subscription.currency
+                                                        )} · You {formatPaymentAmount(
+                                                            personalSubscriptionCostCents(subscription.price_cents, subscription.company_coverage_percent),
+                                                            subscription.currency
+                                                        )}
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="px-3 py-3 align-top capitalize text-muted-foreground">{subscription.billing_cycle}</td>
                                             <td className="whitespace-nowrap px-3 py-3 align-top text-muted-foreground">
@@ -772,15 +796,8 @@ export default function SubscriptionList() {
                     </DialogHeader>
 
                     <div className="space-y-5">
-                        <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" size="sm" onClick={migrateExistingPayments}>
-                                <RefreshCw className="h-4 w-4" />
-                                Migrate History
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={generateFuturePayments}>
-                                <Plus className="h-4 w-4" />
-                                Generate Future
-                            </Button>
+                        <div className="rounded-md border bg-blue-50/40 p-3 text-sm text-blue-950">
+                            The next pending charge is maintained automatically from the billing cycle. Mark it paid and the following occurrence will be created.
                         </div>
 
                         <div className="grid gap-3 sm:grid-cols-3">
@@ -806,7 +823,7 @@ export default function SubscriptionList() {
                         {selectedSubscriptionPayments.length === 0 ? (
                             <EmptyState
                                 title="No payment records"
-                                description="Generate future payments or migrate older subscriptions to create records."
+                                description="An active subscription will create its next pending payment automatically."
                             />
                         ) : (
                             <div className="overflow-x-auto rounded-md border">

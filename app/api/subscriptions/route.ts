@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { ensureNextSubscriptionPayment, ensureUserSubscriptionSchedules } from '@/lib/subscription-schedule';
+import { normalizeCoveragePercent } from '@/lib/recurring-payments';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -29,10 +31,20 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
 
+        await ensureUserSubscriptionSchedules(decoded.user_id);
+
         const subscriptions = await prisma.subscriptions.findMany({
             where: { user_id: decoded.user_id },
             include: {
-                category: true
+                category: true,
+                payments: {
+                    where: { status: 'pending' },
+                    orderBy: { dueDate: 'asc' },
+                    take: 1,
+                },
+                _count: {
+                    select: { payments: true },
+                },
             },
             orderBy: {
                 next_payment_date: 'asc'
@@ -65,7 +77,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
 
-        const { name, provider, price_cents, currency, billing_cycle, start_date, next_payment_date, status, end_date, website_url, notes, categoryId } = await request.json();
+        const { name, provider, price_cents, currency, billing_cycle, company_coverage_percent, start_date, next_payment_date, status, end_date, website_url, notes, categoryId } = await request.json();
 
         if (!name || !price_cents || !billing_cycle) {
             return NextResponse.json(
@@ -83,6 +95,7 @@ export async function POST(request: NextRequest) {
                 price_cents: parseInt(price_cents),
                 currency: currency || 'USD',
                 billing_cycle,
+                company_coverage_percent: normalizeCoveragePercent(Number(company_coverage_percent || 0)),
                 start_date: start_date ? new Date(start_date) : new Date(),
                 next_payment_date: next_payment_date ? new Date(next_payment_date) : null,
                 status: status || 'active',
@@ -92,8 +105,23 @@ export async function POST(request: NextRequest) {
                 categoryId: categoryId ? parseInt(categoryId) : null,
             } 
         });
+        await ensureNextSubscriptionPayment(subscription);
 
-        return NextResponse.json(subscription, { status: 201 });
+        return NextResponse.json(
+            await prisma.subscriptions.findUnique({
+                where: { id: subscription.id },
+                include: {
+                    category: true,
+                    payments: {
+                        where: { status: 'pending' },
+                        orderBy: { dueDate: 'asc' },
+                        take: 1,
+                    },
+                    _count: { select: { payments: true } },
+                },
+            }),
+            { status: 201 }
+        );
     } catch (error) {
         console.error('Error creating subscription:', error);
         return NextResponse.json(

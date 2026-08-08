@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import jwt from 'jsonwebtoken';
-import { generatePaymentSchedule, getOverduePayments } from '@/lib/recurring-payments';
+import { getOverduePayments } from '@/lib/recurring-payments';
+import { ensureNextSubscriptionPayment } from '@/lib/subscription-schedule';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest) {
     }
 }
 
-// POST /api/subscriptions/payments/generate - Generate future payments for subscriptions
+// POST /api/subscriptions/payments - Ensure each active subscription has its next occurrence
 export async function POST(request: NextRequest) {
     try {
         const token = request.cookies.get('token')?.value || request.headers.get('authorization')?.replace('Bearer ', '');
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
 
-        const { subscriptionIds, monthsAhead = 12 } = await request.json();
+        const { subscriptionIds } = await request.json();
 
         // Get subscriptions to generate payments for
         const subscriptions = await prisma.subscriptions.findMany({
@@ -121,55 +122,13 @@ export async function POST(request: NextRequest) {
             }
         });
 
-        const generatedPayments = [];
-
-        for (const subscription of subscriptions) {
-            // Get existing payments to avoid duplicates
-            const existingPayments = await prisma.subscriptionPayment.findMany({
-                where: {
-                    subscriptionId: subscription.id,
-                    dueDate: {
-                        gte: new Date()
-                    }
-                },
-                select: { dueDate: true }
-            });
-
-            const existingDueDates = new Set(
-                existingPayments.map(p => p.dueDate.toISOString().split('T')[0])
-            );
-
-            // Generate payment schedule
-            const schedule = generatePaymentSchedule({
-                billingCycle: subscription.billing_cycle as 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly',
-                startDate: subscription.start_date,
-                endDate: subscription.end_date || undefined,
-                priceCents: subscription.price_cents,
-                currency: subscription.currency
-            }, monthsAhead);
-
-            // Create payments that don't already exist
-            for (const payment of schedule) {
-                const dueDateStr = payment.dueDate.toISOString().split('T')[0];
-                
-                if (!existingDueDates.has(dueDateStr)) {
-                    const newPayment = await prisma.subscriptionPayment.create({
-                        data: {
-                            subscriptionId: subscription.id,
-                            amount: payment.amount,
-                            currency: payment.currency,
-                            dueDate: payment.dueDate,
-                            status: 'pending'
-                        }
-                    });
-                    generatedPayments.push(newPayment);
-                }
-            }
-        }
+        const payments = (await Promise.all(
+            subscriptions.map(ensureNextSubscriptionPayment)
+        )).filter(Boolean);
 
         return NextResponse.json({
-            message: `Generated ${generatedPayments.length} payments`,
-            payments: generatedPayments
+            message: `Ensured ${payments.length} recurring payments`,
+            payments
         });
     } catch (error) {
         console.error('Error generating payments:', error);

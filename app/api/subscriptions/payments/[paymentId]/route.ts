@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { ensureNextSubscriptionPayment } from '@/lib/subscription-schedule';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -74,35 +75,8 @@ export async function PUT(
             data: updateData
         });
 
-        // If marking as paid, update the subscription's next_payment_date
         if (status === 'paid') {
-            const nextPaymentDate = new Date(payment.dueDate);
-            switch (payment.subscription.billing_cycle) {
-                case 'daily':
-                    nextPaymentDate.setUTCDate(nextPaymentDate.getUTCDate() + 1);
-                    break;
-                case 'weekly':
-                    nextPaymentDate.setUTCDate(nextPaymentDate.getUTCDate() + 7);
-                    break;
-                case 'monthly':
-                    nextPaymentDate.setUTCMonth(nextPaymentDate.getUTCMonth() + 1);
-                    break;
-                case 'quarterly':
-                    nextPaymentDate.setUTCMonth(nextPaymentDate.getUTCMonth() + 3);
-                    break;
-                case 'yearly':
-                    nextPaymentDate.setUTCFullYear(nextPaymentDate.getUTCFullYear() + 1);
-                    break;
-            }
-
-            await prisma.subscriptions.update({
-                where: {
-                    id: payment.subscriptionId
-                },
-                data: {
-                    next_payment_date: nextPaymentDate
-                }
-            });
+            await ensureNextSubscriptionPayment(payment.subscription);
         }
 
         return NextResponse.json(updatedPayment);

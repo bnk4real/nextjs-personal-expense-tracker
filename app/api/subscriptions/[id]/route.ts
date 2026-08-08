@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { ensureNextSubscriptionPayment } from '@/lib/subscription-schedule';
+import { normalizeCoveragePercent } from '@/lib/recurring-payments';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -73,7 +75,7 @@ export async function PUT(
         }
 
         const { id } = await params;
-        const { name, provider, price_cents, currency, billing_cycle, start_date, next_payment_date, status, end_date, website_url, notes, categoryId } = await request.json();
+        const { name, provider, price_cents, currency, billing_cycle, company_coverage_percent, start_date, next_payment_date, status, end_date, website_url, notes, categoryId } = await request.json();
 
         if (!name || !price_cents || !billing_cycle) {
             return NextResponse.json(
@@ -82,27 +84,40 @@ export async function PUT(
             );
         }
 
-        // Update the subscription
-        const subscription = await prisma.subscriptions.update({
-            where: { id: id, user_id: decoded.user_id },
-            data: {
-                name,
-                provider,
-                price_cents: parseInt(price_cents),
-                currency: currency || 'USD',
-                billing_cycle,
-                start_date: start_date ? new Date(start_date) : undefined,
-                next_payment_date: next_payment_date ? new Date(next_payment_date) : undefined,
-                status: status || 'active',
-                end_date: end_date ? new Date(end_date) : undefined,
-                website_url,
-                notes,
-                categoryId: categoryId ? parseInt(categoryId) : null,
-                updated_at: new Date()
-            }
-        });
+        const subscription = await prisma.$transaction(async (tx) => {
+            const updated = await tx.subscriptions.update({
+                where: { id: id, user_id: decoded.user_id },
+                data: {
+                    name,
+                    provider,
+                    price_cents: parseInt(price_cents),
+                    currency: currency || 'USD',
+                    billing_cycle,
+                    company_coverage_percent: normalizeCoveragePercent(Number(company_coverage_percent || 0)),
+                    start_date: start_date ? new Date(start_date) : undefined,
+                    next_payment_date: next_payment_date ? new Date(next_payment_date) : undefined,
+                    status: status || 'active',
+                    end_date: end_date ? new Date(end_date) : undefined,
+                    website_url,
+                    notes,
+                    categoryId: categoryId ? parseInt(categoryId) : null,
+                    updated_at: new Date()
+                }
+            });
 
-        return NextResponse.json(subscription);
+            await tx.subscriptionPayment.deleteMany({
+                where: {
+                    subscriptionId: id,
+                    status: 'pending',
+                },
+            });
+            return updated;
+        });
+        await ensureNextSubscriptionPayment(subscription);
+
+        return NextResponse.json(
+            await prisma.subscriptions.findUnique({ where: { id: subscription.id } })
+        );
     } catch (error) {
         console.error('Error updating subscription:', error);
         return NextResponse.json(
